@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import packageMetadata from "../package.json" with { type: "json" };
+
+const packageArgument = `--package=${packageMetadata.name}@${packageMetadata.version}`;
 
 function cli(...args: string[]) {
   return Bun.spawnSync(["bun", "src/cli.ts", ...args], {
@@ -50,13 +53,13 @@ describe("CLI usability", () => {
     expect(JSON.parse(generic.stdout.toString())).toMatchObject({
       mcp: {
         command: "npx",
-        args: ["-y", "--package=@sandovalrr/project-context-mcp@0.0.0", "project-context-mcp"],
+        args: ["-y", packageArgument, "project-context-mcp"],
       },
     });
 
     expect(codex.exitCode).toBe(0);
     expect(codex.stdout.toString()).toContain("[mcp_servers.project_issues]");
-    expect(codex.stdout.toString()).toContain('"--package=@sandovalrr/project-context-mcp@0.0.0"');
+    expect(codex.stdout.toString()).toContain(JSON.stringify(packageArgument));
 
     expect(claude.exitCode).toBe(0);
     expect(JSON.parse(claude.stdout.toString())).toMatchObject({

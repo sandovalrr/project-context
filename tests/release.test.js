@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { generateNotes } from "@semantic-release/release-notes-generator";
 import { parse } from "yaml";
+import releaseConfig from "../release.config.mjs";
 import { packageVersionsFromLockDiff } from "../scripts/check-package-age.mjs";
 import { normalizeReleaseType } from "../scripts/release-analyzer.mjs";
 import { cycloneDxInvocation, synchronizeReleaseVersion } from "../scripts/release-prepare.mjs";
@@ -90,5 +92,30 @@ describe("release policy", () => {
         "/tmp/release.sbom.json",
       ],
     });
+  });
+
+  test("generates feature and bug-fix sections for conventional commits", async () => {
+    const notesPlugin = releaseConfig.plugins.find(
+      (plugin) =>
+        Array.isArray(plugin) && plugin[0] === "@semantic-release/release-notes-generator",
+    );
+    if (!Array.isArray(notesPlugin)) throw new Error("Release notes plugin is not configured");
+
+    const notes = await generateNotes(notesPlugin[1], {
+      commits: [
+        { hash: "68331656", message: "feat: add client-ready MCP manifests" },
+        { hash: "1b98eed6", message: "fix: generate SBOM from Bun installs" },
+      ],
+      lastRelease: { gitTag: "v0.0.0", version: "0.0.0" },
+      nextRelease: { gitTag: "v0.1.0", version: "0.1.0" },
+      options: { repositoryUrl: "https://github.com/sandovalrr/project-context.git" },
+      cwd: process.cwd(),
+      logger: { log() {}, error() {} },
+    });
+
+    expect(notes).toContain("### Features");
+    expect(notes).toContain("add client-ready MCP manifests");
+    expect(notes).toContain("### Bug Fixes");
+    expect(notes).toContain("generate SBOM from Bun installs");
   });
 });
