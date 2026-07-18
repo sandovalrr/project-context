@@ -1,17 +1,28 @@
 # project-context
 
-`project-context` gives local coding agents one guarded interface for issue
-tracking across Linear, GitHub Issues, and Jira Cloud. It resolves the current
-Git repository against host-local configuration, selects the configured issue
-provider, validates the authenticated identity, and previews every mutation
-before applying it.
+`project-context` is a local, provider-neutral MCP server for repository-scoped
+issue handling. It gives agents one guarded interface to Linear, GitHub Issues,
+and Jira Cloud while keeping project mappings and credentials outside source
+repositories.
 
-The repository contains the CLI/MCP implementation, schemas, examples,
-documentation, and the `project-issues` agent skill. Real project mappings,
-credentials, templates, and audit state remain outside this repository on each
-host.
+The server resolves the current Git repository, selects its configured issue
+provider, verifies the authenticated account, and separates every write into a
+preview and a single-attempt apply step. Pull requests, releases, repository
+administration, Git authentication, and commit signing are intentionally out of
+scope.
 
-Default host-local paths:
+## Quick start
+
+Requirements: Node.js 22 or newer on Linux or macOS.
+
+```sh
+VERSION=0.1.0
+npx -y --package="@sandovalrr/project-context-mcp@$VERSION" project-context setup
+npx -y --package="@sandovalrr/project-context-mcp@$VERSION" project-context doctor
+```
+
+The first command creates secure, host-local starter files without overwriting
+anything that already exists:
 
 ```text
 ~/.agents/config/project-context/projects.yaml
@@ -21,34 +32,77 @@ Default host-local paths:
 ~/.local/state/project-context/
 ```
 
-The implementation targets Bun and TypeScript. See
-[`docs/architecture.md`](docs/architecture.md) for the system contract and
-[`docs/configuration.md`](docs/configuration.md) for the YAML model.
-See [`docs/installation.md`](docs/installation.md) for the user-scoped install
-and client-neutral MCP manifest.
+Copy and adapt the sanitized examples in `examples/`, validate the result, and
+then register the `project-context-mcp` stdio command in your MCP client. The
+complete Codex, Claude, Zed, and VS Code configurations are in
+[`docs/installation.md`](docs/installation.md).
 
-The CLI provides nested command help, strict option validation, spelling
-suggestions, and shell completion:
+## Safety model
+
+- Host-local YAML determines the repository, provider, target, and expected
+  identity. Missing or ambiguous context fails closed for writes.
+- Credentials resolve from files, environment variables, OS keychains, or
+  argv-only commands. Literal secrets in YAML are rejected.
+- Provider calls are restricted to fixed HTTPS origins, reject redirects, cap
+  response sizes and timeouts, and never automatically retry writes.
+- Prepared writes expire after ten minutes, are encrypted with AES-256-GCM,
+  and can be claimed only once. An uncertain apply result becomes
+  `indeterminate` and is never replayed automatically.
+- Mutation audit records contain metadata only, are mode `0600`, and rotate
+  locally. The project has no telemetry.
+
+Read [`docs/threat-model.md`](docs/threat-model.md) for trust boundaries and
+residual risks, and [`docs/routing-and-safety.md`](docs/routing-and-safety.md)
+for operational behavior.
+
+## Commands and MCP tools
 
 ```sh
 project-context --help
-project-context issue --help
-project-context completion
+project-context setup --guided
+project-context config validate
+project-context resolve --cwd /path/to/repository
+project-context doctor
+project-context audit list
+project-context skill status
 ```
 
-Interactive terminals receive colorized JSON. Redirected output and `--json`
-remain plain machine-readable JSON; `--no-color` disables styling explicitly.
+The stdio server exposes five tools:
 
-## Contributing
+- `resolve_project_context`
+- `search_issues`
+- `get_issue`
+- `prepare_issue_change`
+- `apply_issue_change`
 
-Contributions are welcome. Read [`CONTRIBUTING.md`](CONTRIBUTING.md) for the
-development prerequisites, architecture boundaries, coding rules, validation
-commands, and pull request checklist. Report security concerns privately as
-described in [`SECURITY.md`](SECURITY.md).
+Every tool has an input and output schema. Starting the server has no setup side
+effects; when host configuration is absent, tools return an actionable
+structured error.
+
+The optional `project-issues` agent skill is packaged but never installed as an
+npm lifecycle side effect:
+
+```sh
+project-context skill status
+project-context skill install
+```
+
+Use `--replace` only after reviewing status; replacement creates a timestamped
+backup.
+
+## Documentation
+
+- [`docs/installation.md`](docs/installation.md): package and MCP client setup.
+- [`docs/configuration.md`](docs/configuration.md): host-local YAML and credential resolvers.
+- [`docs/architecture.md`](docs/architecture.md): components and runtime boundaries.
+- [`docs/provider-behavior.md`](docs/provider-behavior.md): provider-specific behavior.
+- [`docs/releasing.md`](docs/releasing.md): bootstrap, semantic release, npm, and MCP Registry.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md): development and review requirements.
+- [`SECURITY.md`](SECURITY.md): supported versions and private reporting.
 
 ## License and attribution
 
-This project is available under the [`MIT License`](LICENSE), copyright 2026
+This project is available under the [MIT License](LICENSE), copyright 2026
 Richard Sandoval. The copyright and permission notice must remain with copies
 or substantial portions of the software.
 

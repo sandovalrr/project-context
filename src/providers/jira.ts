@@ -56,20 +56,37 @@ export class JiraCloudIssuesAdapter implements IssueProviderAdapter {
     private readonly credential: Record<string, string>,
     private readonly fetcher: typeof fetch = fetch,
   ) {
-    this.#baseUrl = `https://${profile.expected_identity.site.replace(/^https?:\/\//, "").replace(/\/$/, "")}`;
+    const origin = new URL(`https://${profile.expected_identity.site}`);
+    if (!origin.hostname.endsWith(".atlassian.net") || origin.hostname === "atlassian.net") {
+      throw new ProjectContextError(
+        "JIRA_ORIGIN_UNSAFE",
+        "Jira Cloud site must be a tenant under atlassian.net",
+      );
+    }
+    this.#baseUrl = origin.origin;
   }
 
-  #request<T>(path: string, method = "GET", body?: unknown): Promise<T> {
+  #request<T>(
+    path: string,
+    method = "GET",
+    body?: unknown,
+    access: "read" | "write" = method === "GET" ? "read" : "write",
+  ): Promise<T> {
     const basic = btoa(`${this.credential.email ?? ""}:${this.credential.token ?? ""}`);
-    return requestJson<T>(this.fetcher, `${this.#baseUrl}${path}`, {
-      method,
-      headers: {
-        Accept: "application/json",
-        Authorization: `Basic ${basic}`,
-        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+    return requestJson<T>(
+      this.fetcher,
+      `${this.#baseUrl}${path}`,
+      {
+        method,
+        headers: {
+          Accept: "application/json",
+          Authorization: `Basic ${basic}`,
+          ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    });
+      { provider: "Jira Cloud", allowedOrigin: this.#baseUrl, access },
+    );
   }
 
   #snapshot(issue: JiraIssue): IssueSnapshot {
@@ -104,11 +121,16 @@ export class JiraCloudIssuesAdapter implements IssueProviderAdapter {
 
   async search(query: string, limit = 30): Promise<IssueSnapshot[]> {
     const jql = `project = "${this.target.project.id.replaceAll('"', '\\"')}" AND text ~ "${query.replaceAll('"', '\\"')}" ORDER BY updated DESC`;
-    const data = await this.#request<{ issues: JiraIssue[] }>("/rest/api/3/search/jql", "POST", {
-      jql,
-      maxResults: limit,
-      fields: ["summary", "description", "status", "updated", "labels"],
-    });
+    const data = await this.#request<{ issues: JiraIssue[] }>(
+      "/rest/api/3/search/jql",
+      "POST",
+      {
+        jql,
+        maxResults: limit,
+        fields: ["summary", "description", "status", "updated", "labels"],
+      },
+      "read",
+    );
     return data.issues.map((issue) => this.#snapshot(issue));
   }
 

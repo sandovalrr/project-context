@@ -1,55 +1,50 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { afterEach, describe, expect, mock, test } from "bun:test";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { applyIssueOperation, prepareIssueOperation } from "../src/core/operations.ts";
 import { getPaths } from "../src/core/paths.ts";
 import { setupHostConfiguration } from "../src/core/setup.ts";
-
-const temporaryDirectories: string[] = [];
+import { withTemporaryDirectory } from "./helpers/temporary.ts";
 
 afterEach(async () => {
   delete process.env.PROJECT_CONTEXT_CONFIG_DIR;
   delete process.env.PROJECT_CONTEXT_STATE_DIR;
   delete process.env.TEST_GITHUB_TOKEN;
-  await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true })));
 });
 
 function mockFetch(responses: unknown[]) {
-  const requests: Array<{ url: string; init?: RequestInit }> = [];
-  const fetcher = (async (url: string | URL | Request, init?: RequestInit) => {
-    requests.push({ url: String(url), ...(init ? { init } : {}) });
-    const body = responses.shift();
-    if (body === undefined) throw new Error(`unexpected request ${url}`);
-    return new Response(JSON.stringify(body), {
+  const sequence = responses.values();
+  const fetcher = mock(async (url: string | URL | Request) => {
+    const next = sequence.next();
+    if (next.done) throw new Error(`unexpected request ${url}`);
+    return new Response(JSON.stringify(next.value), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
-  }) as typeof fetch;
-  return { fetcher, requests };
+  });
+  return fetcher as unknown as typeof fetch;
 }
 
-async function fixture() {
-  const directory = await mkdtemp(join(tmpdir(), "project-context-operations-"));
-  temporaryDirectories.push(directory);
-  process.env.PROJECT_CONTEXT_CONFIG_DIR = join(directory, "config");
-  process.env.PROJECT_CONTEXT_STATE_DIR = join(directory, "state");
-  process.env.TEST_GITHUB_TOKEN = "token";
-  await setupHostConfiguration();
-  const repository = join(directory, "repository");
-  Bun.spawnSync(["git", "init", "-q", repository]);
-  Bun.spawnSync([
-    "git",
-    "-C",
-    repository,
-    "remote",
-    "add",
-    "origin",
-    "git@github.com:example/example-repository.git",
-  ]);
-  await writeFile(
-    getPaths().projectsFile,
-    `version: 1
+async function withFixture<T>(work: (repository: string) => Promise<T>): Promise<T> {
+  return withTemporaryDirectory("project-context-operations-", async (directory) => {
+    process.env.PROJECT_CONTEXT_CONFIG_DIR = join(directory, "config");
+    process.env.PROJECT_CONTEXT_STATE_DIR = join(directory, "state");
+    process.env.TEST_GITHUB_TOKEN = "token";
+    await setupHostConfiguration();
+    const repository = join(directory, "repository");
+    Bun.spawnSync(["git", "init", "-q", repository]);
+    Bun.spawnSync([
+      "git",
+      "-C",
+      repository,
+      "remote",
+      "add",
+      "origin",
+      "git@github.com:example/example-repository.git",
+    ]);
+    await writeFile(
+      getPaths().projectsFile,
+      `version: 1
 providers:
   github-example:
     type: github
@@ -72,10 +67,10 @@ projects:
               open: open
               done: closed
 `,
-  );
-  await writeFile(
-    getPaths().credentialsFile,
-    `version: 1
+    );
+    await writeFile(
+      getPaths().credentialsFile,
+      `version: 1
 credentials:
   github-example:
     fields:
@@ -83,8 +78,9 @@ credentials:
         source: environment
         variable: TEST_GITHUB_TOKEN
 `,
-  );
-  return { repository };
+    );
+    return work(repository);
+  });
 }
 
 const issue = {
@@ -100,43 +96,71 @@ const issue = {
 
 describe("issue write workflow", () => {
   test("previews, revalidates, applies, consumes, and audits without issue content", async () => {
-    const { repository } = await fixture();
-    const { fetcher, requests } = mockFetch([
-      { id: 1, login: "example-user" },
-      issue,
-      { id: 1, login: "example-user" },
-      issue,
-      {},
-      { ...issue, updated_at: "2026-07-18T10:01:00Z" },
-    ]);
+    await withFixture(async (repository) => {
+      const fetcher = mockFetch([
+        { id: 1, login: "example-user" },
+        issue,
+        { id: 1, login: "example-user" },
+        issue,
+        {},
+        { ...issue, updated_at: "2026-07-18T10:01:00Z" },
+      ]);
 
-    const preview = await prepareIssueOperation(
-      { operation: "comment", identifier: "github:#3", body: "sensitive-comment-body" },
-      { cwd: repository, fetcher },
-    );
-    expect(preview).toMatchObject({ providerAlias: "github", operation: "comment" });
-    expect(preview.target?.identifier).toBe("#3");
+      const preview = await prepareIssueOperation(
+        { operation: "comment", identifier: "github:#3", body: "sensitive-comment-body" },
+        { cwd: repository, fetcher },
+      );
+      expect(preview).toMatchObject({ providerAlias: "github", operation: "comment" });
+      expect(preview.target?.identifier).toBe("#3");
 
-    const result = await applyIssueOperation(preview.token, { cwd: repository, fetcher });
-    expect(result.identifier).toBe("#3");
-    expect(requests.filter((request) => request.url.endsWith("/user"))).toHaveLength(2);
-    await expect(applyIssueOperation(preview.token, { cwd: repository, fetcher })).rejects.toThrow(
-      "not found",
-    );
-    const audit = await readFile(getPaths().auditFile, "utf8");
-    expect(audit).toContain('"outcome":"success"');
-    expect(audit).not.toContain("sensitive-comment-body");
+      const result = await applyIssueOperation(preview.token, { cwd: repository, fetcher });
+      expect(result.identifier).toBe("#3");
+      const calls = (fetcher as unknown as ReturnType<typeof mock>).mock.calls;
+      expect(calls.filter(([url]) => String(url).endsWith("/user"))).toHaveLength(2);
+      await expect(
+        applyIssueOperation(preview.token, { cwd: repository, fetcher }),
+      ).rejects.toThrow("not found");
+      const audit = await readFile(getPaths().auditFile, "utf8");
+      expect(audit).toContain('"outcome":"success"');
+      expect(audit).not.toContain("sensitive-comment-body");
+    });
   });
 
   test("rejects fields the selected provider would silently ignore", async () => {
-    const { repository } = await fixture();
-    const { fetcher } = mockFetch([{ id: 1, login: "example-user" }]);
+    await withFixture(async (repository) => {
+      const fetcher = mockFetch([{ id: 1, login: "example-user" }]);
 
-    await expect(
-      prepareIssueOperation(
-        { operation: "create", input: { title: "Example", priority: "high" } },
+      await expect(
+        prepareIssueOperation(
+          { operation: "create", input: { title: "Example", priority: "high" } },
+          { cwd: repository, fetcher },
+        ),
+      ).rejects.toThrow("not supported for github");
+    });
+  });
+
+  test("preserves indeterminate state when a successful provider write cannot be audited", async () => {
+    await withFixture(async (repository) => {
+      const fetcher = mockFetch([
+        { id: 1, login: "example-user" },
+        issue,
+        { id: 1, login: "example-user" },
+        issue,
+        {},
+        { ...issue, updated_at: "2026-07-18T10:01:00Z" },
+      ]);
+      const preview = await prepareIssueOperation(
+        { operation: "comment", identifier: "github:#3", body: "comment" },
         { cwd: repository, fetcher },
-      ),
-    ).rejects.toThrow("not supported for github");
+      );
+      await mkdir(getPaths().auditFile);
+
+      await expect(
+        applyIssueOperation(preview.token, { cwd: repository, fetcher }),
+      ).rejects.toThrow("regular mode-0600 file");
+      await expect(
+        applyIssueOperation(preview.token, { cwd: repository, fetcher }),
+      ).rejects.toThrow("indeterminate");
+    });
   });
 });

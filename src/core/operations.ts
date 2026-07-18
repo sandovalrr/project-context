@@ -23,10 +23,12 @@ import { resolveCredentialAlias } from "./credentials.ts";
 import { ProjectContextError } from "./errors.ts";
 import { getPaths } from "./paths.ts";
 import {
+  claimPendingChange,
   consumePendingChange,
   createPendingChange,
   type IssueOperationRequest,
-  readPendingChange,
+  markPendingChangeIndeterminate,
+  type PendingChange,
   validatePendingChange,
 } from "./pending.ts";
 import { resolveRepository } from "./repository.ts";
@@ -357,11 +359,10 @@ async function execute(
   }
 }
 
-export async function applyIssueOperation(
-  token: string,
+async function applyClaimedIssueOperation(
+  pending: PendingChange,
   options: { cwd?: string; fetcher?: typeof fetch } = {},
 ): Promise<IssueSnapshot> {
-  const pending = await readPendingChange(token);
   const reference = requestReference(pending.request);
   const current = await runtime(options.cwd ?? process.cwd(), {
     explicitProvider: pending.providerAlias,
@@ -381,34 +382,51 @@ export async function applyIssueOperation(
     ...(currentIssue ? { issueVersion: currentIssue.version } : {}),
   });
 
+  const executeWithFailureAudit = async () => {
+    try {
+      assertExpectedIdentity(current.profile, current.identity);
+      return await execute(current.adapter, current.provider, pending.request, currentIssue);
+    } catch (error) {
+      await appendAuditEvent({
+        operation: pending.request.operation,
+        outcome: "failure",
+        repositoryId: current.repositoryId,
+        providerAlias: current.providerAlias,
+        providerType: current.provider.type,
+        identityId: current.identity.principalId,
+        ...(currentIssue
+          ? { issueIdentifier: currentIssue.identifier, issueId: currentIssue.id }
+          : {}),
+        errorCode: error instanceof ProjectContextError ? error.code : "UNEXPECTED",
+      });
+      throw error;
+    }
+  };
+
+  const result = await executeWithFailureAudit();
+  await appendAuditEvent({
+    operation: pending.request.operation,
+    outcome: "success",
+    repositoryId: current.repositoryId,
+    providerAlias: current.providerAlias,
+    providerType: current.provider.type,
+    identityId: current.identity.principalId,
+    issueIdentifier: result.identifier,
+    issueId: result.id,
+  });
+  await consumePendingChange(pending.token);
+  return result;
+}
+
+export async function applyIssueOperation(
+  token: string,
+  options: { cwd?: string; fetcher?: typeof fetch } = {},
+): Promise<IssueSnapshot> {
+  const pending = await claimPendingChange(token);
   try {
-    assertExpectedIdentity(current.profile, current.identity);
-    const result = await execute(current.adapter, current.provider, pending.request, currentIssue);
-    await consumePendingChange(token);
-    await appendAuditEvent({
-      operation: pending.request.operation,
-      outcome: "success",
-      repositoryId: current.repositoryId,
-      providerAlias: current.providerAlias,
-      providerType: current.provider.type,
-      identityId: current.identity.principalId,
-      issueIdentifier: result.identifier,
-      issueId: result.id,
-    });
-    return result;
+    return await applyClaimedIssueOperation(pending, options);
   } catch (error) {
-    await appendAuditEvent({
-      operation: pending.request.operation,
-      outcome: "failure",
-      repositoryId: current.repositoryId,
-      providerAlias: current.providerAlias,
-      providerType: current.provider.type,
-      identityId: current.identity.principalId,
-      ...(currentIssue
-        ? { issueIdentifier: currentIssue.identifier, issueId: currentIssue.id }
-        : {}),
-      errorCode: error instanceof ProjectContextError ? error.code : "UNEXPECTED",
-    });
+    await markPendingChangeIndeterminate(token);
     throw error;
   }
 }

@@ -71,8 +71,7 @@
           "required": ["login", "host"],
           "properties": {
             "login": { "type": "string", "minLength": 1 },
-            "host": { "type": "string", "minLength": 1 },
-            "api_base_url": { "type": "string", "pattern": "^https://" }
+            "host": { "const": "github.com" }
           }
         }
       }
@@ -89,7 +88,10 @@
           "additionalProperties": false,
           "required": ["site", "account_id"],
           "properties": {
-            "site": { "type": "string", "minLength": 1 },
+            "site": {
+              "type": "string",
+              "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.atlassian\\.net$"
+            },
             "account_id": { "type": "string", "minLength": 1 }
           }
         }

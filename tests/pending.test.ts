@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getPaths } from "../src/core/paths.ts";
 import {
+  claimPendingChange,
   createPendingChange,
+  markPendingChangeIndeterminate,
   readPendingChange,
   validatePendingChange,
 } from "../src/core/pending.ts";
@@ -40,6 +42,7 @@ describe("two-phase issue changes", () => {
     expect(pending.expiresAt).toBe("2026-07-18T10:10:00.000Z");
     const path = join(getPaths().pendingDirectory, `${pending.token}.json`);
     expect((await stat(path)).mode & 0o777).toBe(0o600);
+    expect(await readFile(path, "utf8")).not.toContain("A comment");
     expect((await readPendingChange(pending.token)).request).toMatchObject({
       operation: "comment",
       identifier: "#1",
@@ -107,10 +110,29 @@ describe("two-phase issue changes", () => {
     const pending = await fixture();
     const path = join(getPaths().pendingDirectory, `${pending.token}.json`);
     const stored = JSON.parse(await readFile(path, "utf8"));
-    stored.payload.request.body = "modified";
-    await writeFile(path, JSON.stringify(stored));
+    const modified = { ...stored, ciphertext: `${stored.ciphertext.slice(0, -2)}AA` };
+    await writeFile(path, JSON.stringify(modified));
 
     await expect(readPendingChange(pending.token)).rejects.toThrow("integrity check");
     await expect(readFile(path)).rejects.toThrow();
+  });
+
+  test("deletes malformed preview envelopes", async () => {
+    const pending = await fixture();
+    const path = join(getPaths().pendingDirectory, `${pending.token}.json`);
+    await writeFile(path, "not-json");
+
+    await expect(readPendingChange(pending.token)).rejects.toThrow("invalid envelope");
+    await expect(readFile(path)).rejects.toThrow();
+  });
+
+  test("allows only one apply attempt and preserves indeterminate state", async () => {
+    const pending = await fixture();
+    const claimed = await claimPendingChange(pending.token);
+    expect(claimed.request).toMatchObject({ operation: "comment", identifier: "#1" });
+
+    await expect(claimPendingChange(pending.token)).rejects.toThrow("already being applied");
+    await markPendingChangeIndeterminate(pending.token);
+    await expect(readPendingChange(pending.token)).rejects.toThrow("indeterminate");
   });
 });

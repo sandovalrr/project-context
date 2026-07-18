@@ -3,6 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { resolveProjectContext } from "./core/context.ts";
 import { errorMessage, ProjectContextError } from "./core/errors.ts";
+import { resolveMcpWorkingDirectory } from "./core/mcp-working-directory.ts";
 import {
   applyIssueOperation,
   getIssue,
@@ -10,6 +11,63 @@ import {
   searchIssues,
 } from "./core/operations.ts";
 import type { IssueOperationRequest } from "./core/pending.ts";
+import { PACKAGE_VERSION, SERVER_NAME, setupCommand } from "./metadata.ts";
+
+const providerTypeSchema = z.enum(["linear", "github", "jira-cloud"]);
+const issueSchema = z.object({
+  provider: providerTypeSchema,
+  id: z.string(),
+  identifier: z.string(),
+  title: z.string(),
+  description: z.string().nullable(),
+  status: z.string(),
+  labels: z.array(z.string()),
+  url: z.string().url(),
+  updatedAt: z.string(),
+  version: z.string(),
+});
+const resolveResultSchema = z.object({
+  repository: z.object({
+    id: z.string(),
+    git_root: z.string(),
+    origin: z.string().nullable(),
+    match_source: z.enum(["origin", "remote-alias", "path-alias"]),
+  }),
+  issues: z.object({
+    default_provider: z.string(),
+    configured_providers: z.array(z.string()),
+    selected: z.object({
+      alias: z.string(),
+      type: providerTypeSchema,
+      profile: z.string(),
+      target: z.record(z.string(), z.unknown()),
+      credential_alias: z.string(),
+      credential_available: z.boolean(),
+    }),
+  }),
+});
+const searchResultSchema = z.array(
+  z.object({ providerAlias: z.string(), issues: z.array(issueSchema) }),
+);
+const getResultSchema = z.object({ providerAlias: z.string(), issue: issueSchema });
+const prepareResultSchema = z.object({
+  token: z.string().uuid(),
+  expiresAt: z.string(),
+  repositoryId: z.string(),
+  providerAlias: z.string(),
+  providerType: providerTypeSchema,
+  identity: z.object({ id: z.string(), name: z.string(), scope: z.string() }),
+  operation: z.enum(["create", "update", "comment", "transition", "close", "reopen", "link"]),
+  target: z.object({ identifier: z.string(), title: z.string(), version: z.string() }).optional(),
+  changes: z.record(z.string(), z.unknown()),
+});
+
+function resultSchema<T extends z.ZodType>(schema: T) {
+  return {
+    result: schema.optional(),
+    error: z.object({ code: z.string(), message: z.string() }).optional(),
+  };
+}
 
 function result(value: unknown) {
   return {
@@ -19,17 +77,25 @@ function result(value: unknown) {
 }
 
 function errorResult(error: unknown) {
+  const isMissingConfiguration =
+    error instanceof ProjectContextError && error.code === "CONFIG_NOT_FOUND";
+  const message = isMissingConfiguration
+    ? `${error.message}. Run: ${setupCommand()}`
+    : errorMessage(error);
+  const structuredError = {
+    code: error instanceof ProjectContextError ? error.code : "UNEXPECTED",
+    message,
+  };
+
   return {
     isError: true,
     content: [
       {
         type: "text" as const,
-        text: JSON.stringify({
-          error: error instanceof ProjectContextError ? error.code : "UNEXPECTED",
-          message: errorMessage(error),
-        }),
+        text: JSON.stringify({ error: structuredError.code, message }),
       },
     ],
+    structuredContent: { error: structuredError },
   };
 }
 
@@ -89,7 +155,7 @@ function requestFromTool(input: {
 
 export function createProjectIssuesServer(): McpServer {
   const server = new McpServer(
-    { name: "project-issues", version: "0.1.0" },
+    { name: SERVER_NAME, version: PACKAGE_VERSION },
     {
       instructions:
         "Resolve repository context before issue work. Reads are provider-routed. External writes require prepare_issue_change followed by apply_issue_change using the returned short-lived token.",
@@ -102,9 +168,11 @@ export function createProjectIssuesServer(): McpServer {
       title: "Resolve project issue context",
       description: "Resolve the configured issue providers for the current Git repository.",
       inputSchema: { cwd: cwdSchema },
+      outputSchema: resultSchema(resolveResultSchema),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
-    ({ cwd }) => safely(() => resolveProjectContext(cwd)),
+    ({ cwd }) =>
+      safely(async () => resolveProjectContext(await resolveMcpWorkingDirectory(server, cwd))),
   );
 
   server.registerTool(
@@ -122,12 +190,13 @@ export function createProjectIssuesServer(): McpServer {
           .describe("Search all configured providers only when explicitly true"),
         limit: z.number().int().min(1).max(100).optional(),
       },
+      outputSchema: resultSchema(searchResultSchema),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     },
     ({ query, cwd, provider, all, limit }) =>
-      safely(() =>
+      safely(async () =>
         searchIssues(query, {
-          ...(cwd ? { cwd } : {}),
+          cwd: await resolveMcpWorkingDirectory(server, cwd),
           ...(provider ? { provider } : {}),
           ...(all === undefined ? {} : { all }),
           ...(limit === undefined ? {} : { limit }),
@@ -142,12 +211,13 @@ export function createProjectIssuesServer(): McpServer {
       description:
         "Get one issue using deterministic URL, qualified-reference, or identifier routing.",
       inputSchema: { reference: z.string().min(1), cwd: cwdSchema, provider: providerSchema },
+      outputSchema: resultSchema(getResultSchema),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     },
     ({ reference, cwd, provider }) =>
-      safely(() =>
+      safely(async () =>
         getIssue(reference, {
-          ...(cwd ? { cwd } : {}),
+          cwd: await resolveMcpWorkingDirectory(server, cwd),
           ...(provider ? { provider } : {}),
         }),
       ),
@@ -170,12 +240,13 @@ export function createProjectIssuesServer(): McpServer {
         cwd: cwdSchema,
         provider: providerSchema,
       },
+      outputSchema: resultSchema(prepareResultSchema),
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     },
     ({ cwd, provider, ...input }) =>
-      safely(() =>
+      safely(async () =>
         prepareIssueOperation(requestFromTool(input), {
-          ...(cwd ? { cwd } : {}),
+          cwd: await resolveMcpWorkingDirectory(server, cwd),
           ...(provider ? { provider } : {}),
         }),
       ),
@@ -188,6 +259,7 @@ export function createProjectIssuesServer(): McpServer {
       description:
         "Apply a previously previewed external issue change after revalidating repository, config, identity, and issue version.",
       inputSchema: { token: z.string().uuid(), cwd: cwdSchema },
+      outputSchema: resultSchema(issueSchema),
       annotations: {
         readOnlyHint: false,
         destructiveHint: true,
@@ -195,7 +267,10 @@ export function createProjectIssuesServer(): McpServer {
         openWorldHint: true,
       },
     },
-    ({ token, cwd }) => safely(() => applyIssueOperation(token, { ...(cwd ? { cwd } : {}) })),
+    ({ token, cwd }) =>
+      safely(async () =>
+        applyIssueOperation(token, { cwd: await resolveMcpWorkingDirectory(server, cwd) }),
+      ),
   );
 
   return server;

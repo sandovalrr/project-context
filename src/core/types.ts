@@ -20,7 +20,6 @@ export interface GitHubProviderProfile {
   expected_identity: {
     login: string;
     host: string;
-    api_base_url?: string;
   };
 }
 
@@ -117,8 +116,7 @@ export type CredentialFieldSource =
   | { source: "file"; path: string }
   | { source: "command"; command: string[] }
   | { source: "environment"; variable: string }
-  | { source: "keychain"; service: string; account: string }
-  | { source: "literal"; value: string };
+  | { source: "keychain"; service: string; account: string };
 
 export interface CredentialDefinition {
   fields: Record<string, CredentialFieldSource>;

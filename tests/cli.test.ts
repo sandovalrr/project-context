@@ -14,6 +14,8 @@ describe("CLI usability", () => {
     const top = cli("--help");
     expect(top.exitCode).toBe(0);
     expect(top.stdout.toString()).toContain("project-context issue");
+    expect(top.stdout.toString()).toContain("project-context audit");
+    expect(top.stdout.toString()).toContain("project-context skill");
     expect(top.stdout.toString()).toContain("project-context completion");
     expect(top.stderr.toString()).toBe("");
 

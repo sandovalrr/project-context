@@ -11,6 +11,7 @@ import {
 import { getPaths } from "../src/core/paths.ts";
 import { setupHostConfiguration } from "../src/core/setup.ts";
 import type { CredentialDefinition, CredentialsConfig } from "../src/core/types.ts";
+import { withTemporaryDirectory } from "./helpers/temporary.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -22,7 +23,7 @@ afterEach(async () => {
 });
 
 describe("credential resolution", () => {
-  test("resolves file, environment, literal, and shell-free command fields", async () => {
+  test("resolves file, environment, and shell-free command fields", async () => {
     const directory = await mkdtemp(join(tmpdir(), "project-context-credentials-"));
     temporaryDirectories.push(directory);
     const secretFile = join(directory, "token");
@@ -33,7 +34,6 @@ describe("credential resolution", () => {
       fields: {
         file: { source: "file", path: secretFile },
         environment: { source: "environment", variable: "TEST_PROJECT_CONTEXT_TOKEN" },
-        literal: { source: "literal", value: "developer@example.com" },
         command: {
           source: "command",
           command: ["printf", "%s\\n", "command-secret"],
@@ -44,8 +44,26 @@ describe("credential resolution", () => {
     expect(await resolveCredential(credential)).toEqual({
       file: "file-secret",
       environment: "environment-secret",
-      literal: "developer@example.com",
       command: "command-secret",
+    });
+  });
+
+  test("rejects literal credentials in host configuration", async () => {
+    await withTemporaryDirectory("project-context-credentials-", async (directory) => {
+      const path = join(directory, "credentials.yaml");
+      await writeFile(
+        path,
+        `version: 1
+credentials:
+  unsafe:
+    fields:
+      token:
+        source: literal
+        value: plaintext-secret
+`,
+      );
+
+      await expect(loadCredentialConfig(path)).rejects.toThrow("Invalid credential registry");
     });
   });
 

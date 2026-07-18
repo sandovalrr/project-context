@@ -1,8 +1,9 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 import { stat } from "node:fs/promises";
 import chalk, { Chalk } from "chalk";
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
+import { listAuditEvents, purgeAuditEvents } from "./core/audit.ts";
 import {
   loadCredentialConfig,
   loadProjectsConfig,
@@ -11,6 +12,7 @@ import {
 import { resolveProjectContext } from "./core/context.ts";
 import { addFileCredential, resolveCredentialAlias } from "./core/credentials.ts";
 import { errorMessage, ProjectContextError } from "./core/errors.ts";
+import { migrateHostConfiguration } from "./core/migrations.ts";
 import {
   applyIssueOperation,
   getIssue,
@@ -20,8 +22,10 @@ import {
 import { absolutePath, getPaths } from "./core/paths.ts";
 import type { IssueOperationRequest } from "./core/pending.ts";
 import { promptHidden } from "./core/prompt.ts";
-import { setupHostConfiguration } from "./core/setup.ts";
+import { guidedSetup, setupHostConfiguration } from "./core/setup.ts";
+import { installProjectIssuesSkill, projectIssuesSkillStatus } from "./core/skill.ts";
 import { startProjectIssuesStdioServer } from "./mcp.ts";
+import { PACKAGE_VERSION } from "./metadata.ts";
 
 interface OutputOptions {
   json?: boolean;
@@ -170,7 +174,7 @@ function issuePrepareRequest(argv: Record<string, unknown>): IssueOperationReque
 const cli = yargs(hideBin(process.argv))
   .scriptName("project-context")
   .usage("$0 <command> [options]")
-  .version("0.1.0")
+  .version(PACKAGE_VERSION)
   .option("cwd", {
     type: "string",
     normalize: true,
@@ -192,8 +196,13 @@ const cli = yargs(hideBin(process.argv))
   .command(
     "setup",
     "Create missing host-local configuration and state files",
-    () => {},
-    async (argv) => print(await setupHostConfiguration(), argv),
+    (command) =>
+      command.option("guided", {
+        type: "boolean",
+        default: false,
+        description: "Interactively produce provider and credential configuration snippets",
+      }),
+    async (argv) => print(argv.guided ? await guidedSetup() : await setupHostConfiguration(), argv),
   )
   .command(
     ["resolve", "explain"],
@@ -221,20 +230,72 @@ const cli = yargs(hideBin(process.argv))
       )
       .command(
         "migrate",
-        "Preview schema migration status",
-        () => {},
+        "Preview schema migration status; --apply performs an available migration",
+        (command) =>
+          command.option("apply", {
+            type: "boolean",
+            default: false,
+            description: "Apply the previewed migration with backups and atomic replacement",
+          }),
         async (argv) => {
-          const result = await validateConfiguration();
-          print(
-            {
-              migrated: false,
-              reason: `Configuration is already schema version ${result.schema_version}`,
-            },
-            argv,
-          );
+          print(await migrateHostConfiguration({ apply: argv.apply }), argv);
         },
       )
       .demandCommand(1, "Choose validate or migrate")
+      .strictCommands(),
+  )
+  .command("audit", "Inspect or purge the local metadata-only mutation audit", (audit) =>
+    audit
+      .command(
+        "list",
+        "List recent mutation audit metadata",
+        (command) =>
+          command.option("limit", {
+            type: "number",
+            default: 100,
+            description: "Maximum events to return (1-10000)",
+          }),
+        async (argv) => print(await listAuditEvents(argv.limit), argv),
+      )
+      .command(
+        "purge",
+        "Delete all local mutation audit files",
+        (command) =>
+          command.option("yes", {
+            type: "boolean",
+            default: false,
+            description: "Confirm permanent deletion",
+          }),
+        async (argv) => {
+          if (!argv.yes) {
+            throw new ProjectContextError("CONFIRMATION_REQUIRED", "Audit purge requires --yes");
+          }
+          print(await purgeAuditEvents(), argv);
+        },
+      )
+      .demandCommand(1, "Choose list or purge")
+      .strictCommands(),
+  )
+  .command("skill", "Inspect or explicitly install the optional project-issues skill", (skill) =>
+    skill
+      .command(
+        "status",
+        "Compare the installed skill with this package version",
+        () => {},
+        async (argv) => print(await projectIssuesSkillStatus(), argv),
+      )
+      .command(
+        "install",
+        "Install the packaged skill without changing MCP configuration",
+        (command) =>
+          command.option("replace", {
+            type: "boolean",
+            default: false,
+            description: "Back up and replace an existing skill after reviewing skill status",
+          }),
+        async (argv) => print(await installProjectIssuesSkill({ replace: argv.replace }), argv),
+      )
+      .demandCommand(1, "Choose status or install")
       .strictCommands(),
   )
   .command("credential", "Add or test credential resolvers", (credential) =>
@@ -405,8 +466,12 @@ const cli = yargs(hideBin(process.argv))
             {
               mcp: {
                 name: "project_issues",
-                command: absolutePath("~/.local/bin/project-context"),
-                args: ["mcp"],
+                command: "npx",
+                args: [
+                  "-y",
+                  `--package=@sandovalrr/project-context-mcp@${PACKAGE_VERSION}`,
+                  "project-context-mcp",
+                ],
                 transport: "stdio",
               },
               skill: absolutePath("~/.agents/skills/project-issues"),

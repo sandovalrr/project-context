@@ -1,5 +1,5 @@
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { lstat, mkdir, open, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ProjectContextError } from "./errors.ts";
 import { getPaths } from "./paths.ts";
@@ -36,35 +36,75 @@ export interface PendingContext {
   issueVersion?: string;
 }
 
-function pendingPath(token: string): string {
+interface EncryptedPendingChange {
+  version: 2;
+  token: string;
+  expiresAt: string;
+  nonce: string;
+  authenticationTag: string;
+  ciphertext: string;
+}
+
+const ENCRYPTION_ALGORITHM = "aes-256-gcm";
+const NONCE_BYTES = 12;
+const KEY_BYTES = 32;
+
+function assertToken(token: string): string {
   if (!/^[0-9a-f-]{36}$/.test(token)) {
     throw new ProjectContextError("PREVIEW_TOKEN_INVALID", "Invalid issue preview token");
   }
-  return join(getPaths().pendingDirectory, `${token}.json`);
+  return token;
+}
+
+function preparedPath(token: string): string {
+  return join(getPaths().pendingDirectory, `${assertToken(token)}.json`);
+}
+
+function applyingPath(token: string): string {
+  return join(getPaths().pendingDirectory, `${assertToken(token)}.applying`);
+}
+
+function indeterminatePath(token: string): string {
+  return join(getPaths().pendingDirectory, `${assertToken(token)}.indeterminate.json`);
+}
+
+function authenticatedMetadata(
+  envelope: Pick<EncryptedPendingChange, "version" | "token" | "expiresAt">,
+) {
+  return Buffer.from(
+    JSON.stringify({
+      version: envelope.version,
+      token: envelope.token,
+      expiresAt: envelope.expiresAt,
+    }),
+  );
 }
 
 async function previewKey(): Promise<Buffer> {
   const paths = getPaths();
   await mkdir(paths.stateDirectory, { recursive: true, mode: 0o700 });
   try {
-    await writeFile(paths.previewKeyFile, randomBytes(32), { mode: 0o600, flag: "wx" });
+    await writeFile(paths.previewKeyFile, randomBytes(KEY_BYTES), { mode: 0o600, flag: "wx" });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
   }
+
   const metadata = await lstat(paths.previewKeyFile);
   if (!metadata.isFile() || metadata.isSymbolicLink() || (metadata.mode & 0o077) !== 0) {
     throw new ProjectContextError(
       "PREVIEW_KEY_UNSAFE",
-      `Preview signing key ${paths.previewKeyFile} must be a regular mode-0600 file`,
+      `Preview encryption key ${paths.previewKeyFile} must be a regular mode-0600 file`,
     );
   }
-  return readFile(paths.previewKeyFile);
-}
 
-async function signPendingChange(payload: PendingChange): Promise<string> {
-  return createHmac("sha256", await previewKey())
-    .update(JSON.stringify(payload))
-    .digest("hex");
+  const key = await readFile(paths.previewKeyFile);
+  if (key.length !== KEY_BYTES) {
+    throw new ProjectContextError(
+      "PREVIEW_KEY_INVALID",
+      `Preview encryption key ${paths.previewKeyFile} must contain ${KEY_BYTES} bytes`,
+    );
+  }
+  return key;
 }
 
 function assertPendingChange(value: unknown): asserts value is PendingChange {
@@ -75,6 +115,7 @@ function assertPendingChange(value: unknown): asserts value is PendingChange {
   if (
     record.version !== 1 ||
     typeof record.token !== "string" ||
+    typeof record.createdAt !== "string" ||
     typeof record.expiresAt !== "string" ||
     typeof record.repositoryId !== "string" ||
     typeof record.gitRoot !== "string" ||
@@ -88,10 +129,154 @@ function assertPendingChange(value: unknown): asserts value is PendingChange {
   }
 }
 
+function assertEnvelope(value: unknown, token: string): asserts value is EncryptedPendingChange {
+  if (!value || typeof value !== "object") {
+    throw new ProjectContextError("PREVIEW_INVALID", "Stored issue preview is invalid");
+  }
+  const envelope = value as Partial<EncryptedPendingChange>;
+  if (
+    envelope.version !== 2 ||
+    envelope.token !== token ||
+    typeof envelope.expiresAt !== "string" ||
+    typeof envelope.nonce !== "string" ||
+    typeof envelope.authenticationTag !== "string" ||
+    typeof envelope.ciphertext !== "string"
+  ) {
+    throw new ProjectContextError("PREVIEW_INVALID", "Stored issue preview is invalid");
+  }
+}
+
+async function encryptPendingChange(pending: PendingChange): Promise<EncryptedPendingChange> {
+  const nonce = randomBytes(NONCE_BYTES);
+  const envelopeMetadata = {
+    version: 2 as const,
+    token: pending.token,
+    expiresAt: pending.expiresAt,
+  };
+  const cipher = createCipheriv(ENCRYPTION_ALGORITHM, await previewKey(), nonce);
+  cipher.setAAD(authenticatedMetadata(envelopeMetadata));
+  const ciphertext = Buffer.concat([
+    cipher.update(JSON.stringify(pending), "utf8"),
+    cipher.final(),
+  ]);
+
+  return {
+    ...envelopeMetadata,
+    nonce: nonce.toString("base64"),
+    authenticationTag: cipher.getAuthTag().toString("base64"),
+    ciphertext: ciphertext.toString("base64"),
+  };
+}
+
+async function decryptPendingChange(
+  envelope: EncryptedPendingChange,
+  path: string,
+): Promise<PendingChange> {
+  try {
+    const decipher = createDecipheriv(
+      ENCRYPTION_ALGORITHM,
+      await previewKey(),
+      Buffer.from(envelope.nonce, "base64"),
+    );
+    decipher.setAAD(authenticatedMetadata(envelope));
+    decipher.setAuthTag(Buffer.from(envelope.authenticationTag, "base64"));
+    const plaintext = Buffer.concat([
+      decipher.update(Buffer.from(envelope.ciphertext, "base64")),
+      decipher.final(),
+    ]).toString("utf8");
+    const pending: unknown = JSON.parse(plaintext);
+    assertPendingChange(pending);
+    if (pending.token !== envelope.token || pending.expiresAt !== envelope.expiresAt) {
+      throw new Error("authenticated metadata does not match payload");
+    }
+    return pending;
+  } catch (error) {
+    await rm(path, { force: true });
+    if (error instanceof ProjectContextError) throw error;
+    throw new ProjectContextError(
+      "PREVIEW_TAMPERED",
+      "Stored issue preview failed its integrity check and was invalidated",
+    );
+  }
+}
+
+async function readEncryptedPendingChange(path: string, token: string): Promise<PendingChange> {
+  const metadata = await lstat(path).catch((error) => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new ProjectContextError("PREVIEW_NOT_FOUND", `Issue preview ${token} was not found`);
+    }
+    throw error;
+  });
+  if (!metadata.isFile() || metadata.isSymbolicLink() || (metadata.mode & 0o077) !== 0) {
+    throw new ProjectContextError(
+      "PREVIEW_FILE_UNSAFE",
+      `Issue preview ${token} must be stored in a regular mode-0600 file`,
+    );
+  }
+  const content = await readFile(path, "utf8");
+  const value = await Promise.resolve(content)
+    .then((serialized): EncryptedPendingChange => {
+      const parsed: unknown = JSON.parse(serialized);
+      assertEnvelope(parsed, token);
+      return parsed;
+    })
+    .catch(async () => {
+      await rm(path, { force: true });
+      throw new ProjectContextError(
+        "PREVIEW_TAMPERED",
+        "Stored issue preview has an invalid envelope and was invalidated",
+      );
+    });
+  return decryptPendingChange(value, path);
+}
+
+async function exists(path: string): Promise<boolean> {
+  return lstat(path)
+    .then(() => true)
+    .catch((error) => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+      throw error;
+    });
+}
+
+async function removePendingChange(token: string): Promise<void> {
+  await Promise.all([
+    rm(preparedPath(token), { force: true }),
+    rm(applyingPath(token), { force: true }),
+    rm(indeterminatePath(token), { force: true }),
+  ]);
+}
+
+export async function purgeExpiredPendingChanges(now = new Date()): Promise<number> {
+  const directory = getPaths().pendingDirectory;
+  const entries = await readdir(directory).catch((error) => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  });
+  const candidates = entries.filter((entry) => entry.endsWith(".json"));
+  const removed = await Promise.all(
+    candidates.map(async (entry) => {
+      const path = join(directory, entry);
+      const expiresAt = await readFile(path, "utf8")
+        .then((content) => JSON.parse(content) as { expiresAt?: unknown })
+        .then((value) => value.expiresAt)
+        .catch(() => undefined);
+      if (typeof expiresAt === "string" && new Date(expiresAt).getTime() > now.getTime()) return 0;
+      await rm(path, { force: true });
+      if (!entry.endsWith(".indeterminate.json")) {
+        await rm(join(directory, `${entry.slice(0, -".json".length)}.applying`), { force: true });
+      }
+      return 1;
+    }),
+  );
+  return removed.filter((value) => value === 1).length;
+}
+
 export async function createPendingChange(
   input: Omit<PendingChange, "version" | "token" | "createdAt" | "expiresAt">,
   now = new Date(),
 ): Promise<PendingChange> {
+  await purgeExpiredPendingChanges(now);
   const token = crypto.randomUUID();
   const pending: PendingChange = {
     version: 1,
@@ -101,45 +286,60 @@ export async function createPendingChange(
     ...input,
   };
   await mkdir(getPaths().pendingDirectory, { recursive: true, mode: 0o700 });
-  await writeFile(
-    pendingPath(token),
-    `${JSON.stringify({ payload: pending, signature: await signPendingChange(pending) })}\n`,
-    { mode: 0o600, flag: "wx" },
-  );
+  await writeFile(preparedPath(token), `${JSON.stringify(await encryptPendingChange(pending))}\n`, {
+    mode: 0o600,
+    flag: "wx",
+  });
   return pending;
 }
 
 export async function readPendingChange(token: string): Promise<PendingChange> {
-  const value: unknown = await readFile(pendingPath(token), "utf8")
-    .then((content) => JSON.parse(content))
-    .catch((error) => {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        throw new ProjectContextError("PREVIEW_NOT_FOUND", `Issue preview ${token} was not found`);
-      }
-      throw error;
-    });
-
-  if (!value || typeof value !== "object") {
-    throw new ProjectContextError("PREVIEW_INVALID", "Stored issue preview is invalid");
-  }
-  const wrapper = value as { payload?: unknown; signature?: unknown };
-  assertPendingChange(wrapper.payload);
-  if (typeof wrapper.signature !== "string" || !/^[0-9a-f]{64}$/.test(wrapper.signature)) {
-    throw new ProjectContextError("PREVIEW_INVALID", "Stored issue preview signature is invalid");
-  }
-  const expected = Buffer.from(await signPendingChange(wrapper.payload), "hex");
-  const actual = Buffer.from(wrapper.signature, "hex");
-  if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
-    await rm(pendingPath(token), { force: true });
+  if (await exists(indeterminatePath(token))) {
     throw new ProjectContextError(
-      "PREVIEW_TAMPERED",
-      "Stored issue preview failed its integrity check and was invalidated",
+      "PREVIEW_INDETERMINATE",
+      `Issue preview ${token} has an indeterminate provider outcome and cannot be replayed`,
     );
   }
-  if (wrapper.payload.token !== token) {
-    throw new ProjectContextError("PREVIEW_INVALID", "Stored issue preview token does not match");
+  if (await exists(applyingPath(token))) {
+    throw new ProjectContextError(
+      "PREVIEW_ALREADY_APPLYING",
+      `Issue preview ${token} is already being applied`,
+    );
   }
-  return wrapper.payload;
+  return readEncryptedPendingChange(preparedPath(token), token);
+}
+
+export async function claimPendingChange(token: string): Promise<PendingChange> {
+  if (await exists(indeterminatePath(token))) {
+    throw new ProjectContextError(
+      "PREVIEW_INDETERMINATE",
+      `Issue preview ${token} has an indeterminate provider outcome and cannot be replayed`,
+    );
+  }
+  const claim = await open(applyingPath(token), "wx", 0o600).catch((error) => {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      throw new ProjectContextError(
+        "PREVIEW_ALREADY_APPLYING",
+        `Issue preview ${token} is already being applied`,
+      );
+    }
+    throw error;
+  });
+  await claim.writeFile(`${new Date().toISOString()}\n`);
+  await claim.close();
+  try {
+    return await readEncryptedPendingChange(preparedPath(token), token);
+  } catch (error) {
+    await rm(applyingPath(token), { force: true });
+    throw error;
+  }
+}
+
+export async function markPendingChangeIndeterminate(token: string): Promise<void> {
+  await rename(preparedPath(token), indeterminatePath(token)).catch((error) => {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  });
+  await rm(applyingPath(token), { force: true });
 }
 
 export async function validatePendingChange(
@@ -148,7 +348,7 @@ export async function validatePendingChange(
   now = new Date(),
 ): Promise<void> {
   const invalidate = async (code: string, message: string) => {
-    await rm(pendingPath(pending.token), { force: true });
+    await removePendingChange(pending.token);
     throw new ProjectContextError(code, message);
   };
   if (new Date(pending.expiresAt).getTime() <= now.getTime()) {
@@ -174,5 +374,6 @@ export async function validatePendingChange(
 }
 
 export async function consumePendingChange(token: string): Promise<void> {
-  await rm(pendingPath(token), { force: true });
+  await rm(applyingPath(token), { force: true });
+  await rm(preparedPath(token), { force: true });
 }

@@ -1,3 +1,4 @@
+import { createInterface } from "node:readline/promises";
 import { ProjectContextError } from "./errors.ts";
 
 type PromptInputResult =
@@ -64,4 +65,23 @@ export async function promptHidden(label: string): Promise<string> {
 
     listen("");
   });
+}
+
+export async function promptVisible(label: string): Promise<string> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    throw new ProjectContextError(
+      "INTERACTIVE_TERMINAL_REQUIRED",
+      "A TTY is required for guided setup; use project-context setup for non-interactive setup",
+    );
+  }
+
+  const prompt = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = (await prompt.question(label)).trim();
+    if (!answer)
+      throw new ProjectContextError("PROMPT_VALUE_REQUIRED", `${label.trim()} is required`);
+    return answer;
+  } finally {
+    prompt.close();
+  }
 }

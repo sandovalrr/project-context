@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { realpath } from "node:fs/promises";
 import { resolve } from "node:path";
 import { ProjectContextError } from "./errors.ts";
@@ -30,18 +31,22 @@ export function normalizeRemoteUrl(remote: string): string {
 }
 
 function runGit(cwd: string, args: string[]): string {
-  const result = Bun.spawnSync(["git", "-C", cwd, ...args], {
-    stdout: "pipe",
-    stderr: "pipe",
+  const result = spawnSync("git", ["-C", cwd, ...args], {
+    encoding: "utf8",
+    maxBuffer: 64 * 1024,
+    shell: false,
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: 10_000,
+    windowsHide: true,
   });
-  if (result.exitCode !== 0) {
-    const detail = result.stderr.toString().trim();
+  if (result.error || result.status !== 0) {
+    const detail = result.stderr.trim();
     throw new ProjectContextError(
       "GIT_COMMAND_FAILED",
       `Git command failed in ${cwd}: ${detail || args.join(" ")}`,
     );
   }
-  return result.stdout.toString().trim();
+  return result.stdout.trim();
 }
 
 function sameRepository(left: string, right: string): boolean {
