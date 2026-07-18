@@ -38,4 +38,50 @@ describe("CLI usability", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout.toString()).toContain("project-context");
   });
+
+  test("emits version-pinned native manifests for supported MCP clients", () => {
+    const generic = cli("integration", "manifest", "--json");
+    const codex = cli("integration", "manifest", "--client", "codex");
+    const claude = cli("integration", "manifest", "--client", "claude");
+    const zed = cli("integration", "manifest", "--client", "zed");
+    const vscode = cli("integration", "manifest", "--client", "vscode");
+
+    expect(generic.exitCode).toBe(0);
+    expect(JSON.parse(generic.stdout.toString())).toMatchObject({
+      mcp: {
+        command: "npx",
+        args: ["-y", "--package=@sandovalrr/project-context-mcp@0.0.0", "project-context-mcp"],
+      },
+    });
+
+    expect(codex.exitCode).toBe(0);
+    expect(codex.stdout.toString()).toContain("[mcp_servers.project_issues]");
+    expect(codex.stdout.toString()).toContain('"--package=@sandovalrr/project-context-mcp@0.0.0"');
+
+    expect(claude.exitCode).toBe(0);
+    expect(JSON.parse(claude.stdout.toString())).toMatchObject({
+      mcpServers: { project_issues: { command: "npx" } },
+    });
+
+    expect(zed.exitCode).toBe(0);
+    expect(JSON.parse(zed.stdout.toString())).toMatchObject({
+      context_servers: { project_issues: { command: "npx" } },
+    });
+
+    expect(vscode.exitCode).toBe(0);
+    expect(JSON.parse(vscode.stdout.toString())).toMatchObject({
+      servers: { project_issues: { type: "stdio", command: "npx" } },
+    });
+  });
+
+  test("wraps a native client manifest when machine-readable output is requested", () => {
+    const result = cli("integration", "manifest", "--client", "codex", "--json");
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout.toString())).toMatchObject({
+      client: "codex",
+      format: "toml",
+      configuration: expect.stringContaining("[mcp_servers.project_issues]"),
+    });
+  });
 });

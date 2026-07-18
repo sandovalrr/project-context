@@ -49,6 +49,21 @@ The MCP process writes protocol messages to stdout and diagnostics to stderr.
 Do not wrap it in a shell command, background it, or attach a remote HTTP
 transport. Version 0.1 supports local stdio only.
 
+The CLI can generate the configuration below with the package version already
+pinned:
+
+```sh
+project-context integration manifest --client codex
+project-context integration manifest --client claude
+project-context integration manifest --client zed
+project-context integration manifest --client vscode
+```
+
+Codex output is TOML; the other client outputs are JSON. Without `--client`,
+the command prints the provider-neutral manifest and shared skill path. Add
+`--json` to a client-specific command when automation needs a stable envelope
+with `client`, `format`, and `configuration` fields.
+
 ### Working-directory resolution
 
 The server determines repository context in this order:

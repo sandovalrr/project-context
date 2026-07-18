@@ -12,6 +12,11 @@ import {
 import { resolveProjectContext } from "./core/context.ts";
 import { addFileCredential, resolveCredentialAlias } from "./core/credentials.ts";
 import { errorMessage, ProjectContextError } from "./core/errors.ts";
+import {
+  clientIntegrationManifest,
+  genericIntegrationManifest,
+  integrationClients,
+} from "./core/integration.ts";
 import { migrateHostConfiguration } from "./core/migrations.ts";
 import {
   applyIssueOperation,
@@ -19,7 +24,7 @@ import {
   prepareIssueOperation,
   searchIssues,
 } from "./core/operations.ts";
-import { absolutePath, getPaths } from "./core/paths.ts";
+import { getPaths } from "./core/paths.ts";
 import type { IssueOperationRequest } from "./core/pending.ts";
 import { promptHidden } from "./core/prompt.ts";
 import { guidedSetup, setupHostConfiguration } from "./core/setup.ts";
@@ -459,25 +464,31 @@ const cli = yargs(hideBin(process.argv))
     integration
       .command(
         "manifest",
-        "Print the stdio MCP manifest and shared skill path",
-        () => {},
-        (argv) =>
-          print(
-            {
-              mcp: {
-                name: "project_issues",
-                command: "npx",
-                args: [
-                  "-y",
-                  `--package=@sandovalrr/project-context-mcp@${PACKAGE_VERSION}`,
-                  "project-context-mcp",
-                ],
-                transport: "stdio",
-              },
-              skill: absolutePath("~/.agents/skills/project-issues"),
-            },
-            argv,
-          ),
+        "Print the generic manifest or native configuration for an MCP client",
+        (command) =>
+          command.option("client", {
+            type: "string",
+            choices: integrationClients,
+            description: "Emit ready-to-paste configuration for this MCP client",
+          }),
+        (argv) => {
+          if (!argv.client) {
+            print(genericIntegrationManifest(), argv);
+            return;
+          }
+
+          const manifest = clientIntegrationManifest(argv.client);
+          if (argv.json) {
+            print(manifest, argv);
+            return;
+          }
+
+          console.log(
+            manifest.format === "toml"
+              ? manifest.configuration
+              : JSON.stringify(manifest.configuration, null, 2),
+          );
+        },
       )
       .demandCommand(1, "Choose manifest")
       .strictCommands(),
