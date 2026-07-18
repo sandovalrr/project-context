@@ -162,10 +162,7 @@
               "properties": {
                 "team": { "$ref": "#/$defs/identityRef" },
                 "project": {
-                  "oneOf": [
-                    { "$ref": "#/$defs/identityRef" },
-                    { "const": "none" }
-                  ]
+                  "oneOf": [{ "$ref": "#/$defs/identityRef" }, { "const": "none" }]
                 }
               }
             },
@@ -283,10 +280,7 @@
       "additionalProperties": true,
       "properties": {
         "priority": {
-          "oneOf": [
-            { "type": "string" },
-            { "type": "number" }
-          ]
+          "oneOf": [{ "type": "string" }, { "type": "number" }]
         },
         "labels": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
         "assignee": { "type": "string" }
