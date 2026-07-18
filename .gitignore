@@ -1,12 +1,20 @@
+# Dependencies and generated output
 node_modules/
 dist/
 coverage/
-.DS_Store
+*.tsbuildinfo
 *.log
 
-# Host-local configuration, credentials, and runtime state never belong here.
-config/projects.yaml
-config/credentials.yaml
-config/secrets/
+# Local environment and host-specific configuration
+.env
+.env.*
+!.env.example
+.agents/
 .project-context/
+credentials.yaml
+projects.yaml
+secrets/
 
+# Editor and operating-system files
+.DS_Store
+.idea/

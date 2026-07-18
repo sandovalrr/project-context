@@ -38,3 +38,21 @@ project-context completion
 
 Interactive terminals receive colorized JSON. Redirected output and `--json`
 remain plain machine-readable JSON; `--no-color` disables styling explicitly.
+
+## Contributing
+
+Contributions are welcome. Read [`CONTRIBUTING.md`](CONTRIBUTING.md) for the
+development prerequisites, architecture boundaries, coding rules, validation
+commands, and pull request checklist. Report security concerns privately as
+described in [`SECURITY.md`](SECURITY.md).
+
+## License and attribution
+
+This project is available under the [`MIT License`](LICENSE), copyright 2026
+Richard Sandoval. The copyright and permission notice must remain with copies
+or substantial portions of the software.
+
+If this repository is used as the starting point for another project, a visible
+acknowledgment is appreciated:
+
+> Based on project-context, created by Richard Sandoval.
