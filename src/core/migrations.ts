@@ -13,6 +13,11 @@ interface RegistryMigration {
   value: Record<string, unknown>;
 }
 
+interface RegistryBackup {
+  source: string;
+  target: string;
+}
+
 export interface ConfigurationMigrationResult {
   needed: boolean;
   applied: boolean;
@@ -99,6 +104,35 @@ async function writeMigration(entry: RegistryMigration): Promise<string> {
   return temporary;
 }
 
+async function replaceFiles(targets: string[], temporaryFiles: string[], index = 0): Promise<void> {
+  const target = targets[index];
+  const temporary = temporaryFiles[index];
+  if (!target || !temporary) return;
+  await rename(temporary, target);
+  await replaceFiles(targets, temporaryFiles, index + 1);
+}
+
+async function restoreBackups(backups: RegistryBackup[]): Promise<void> {
+  const temporaryFiles = await Promise.all(
+    backups.map(async (backup) => {
+      const temporary = join(
+        getPaths().configDirectory,
+        `.rollback.${crypto.randomUUID()}.migration.tmp`,
+      );
+      await copyFile(backup.source, temporary);
+      return temporary;
+    }),
+  );
+  try {
+    await replaceFiles(
+      backups.map((backup) => backup.target),
+      temporaryFiles,
+    );
+  } finally {
+    await Promise.all(temporaryFiles.map((path) => rm(path, { force: true })));
+  }
+}
+
 async function applyMigrations(migrations: RegistryMigration[]): Promise<string[]> {
   const paths = getPaths();
   const changed = migrations.filter((entry) => entry.fromVersion !== entry.toVersion);
@@ -113,18 +147,32 @@ async function applyMigrations(migrations: RegistryMigration[]): Promise<string[
         `${entry.kind}-v${entry.fromVersion}-${suffix}.yaml`,
       );
       await copyFile(entry.path, backup);
-      return backup;
+      return { source: backup, target: entry.path };
     }),
   );
   const temporaryFiles = await Promise.all(changed.map(writeMigration));
   try {
-    await Promise.all(
-      changed.map((entry, index) => rename(temporaryFiles[index] as string, entry.path)),
+    await replaceFiles(
+      changed.map((entry) => entry.path),
+      temporaryFiles,
+    );
+  } catch (error) {
+    await restoreBackups(backups).catch((rollbackError) => {
+      throw new ProjectContextError(
+        "CONFIG_MIGRATION_ROLLBACK_FAILED",
+        "Configuration migration failed and the original registries could not be fully restored",
+        { cause: error, rollbackError },
+      );
+    });
+    throw new ProjectContextError(
+      "CONFIG_MIGRATION_FAILED",
+      "Configuration migration failed; the original registries were restored",
+      { cause: error },
     );
   } finally {
     await Promise.all(temporaryFiles.map((path) => rm(path, { force: true })));
   }
-  return backups;
+  return backups.map((backup) => backup.source);
 }
 
 export async function migrateHostConfiguration(
@@ -152,8 +200,10 @@ export async function migrateHostConfiguration(
       migration(paths.projectsFile, "projects"),
       migration(paths.credentialsFile, "credentials"),
     ]);
+    const currentFiles = publicFiles(currentMigrations);
+    if (currentFiles.length === 0) return { needed: false, applied: false, files: [] };
     const backups = await applyMigrations(currentMigrations);
-    return { needed: true, applied: true, files: publicFiles(currentMigrations), backups };
+    return { needed: true, applied: true, files: currentFiles, backups };
   } finally {
     await lock.close();
     await rm(paths.lockFile, { force: true });

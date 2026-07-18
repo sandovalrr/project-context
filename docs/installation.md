@@ -17,11 +17,13 @@ VERSION=0.1.0
 npx -y --package="@sandovalrr/project-context-mcp@$VERSION" project-context setup
 ```
 
-`setup` is non-interactive and idempotent: it creates only missing files and
-enforces user-only permissions. `setup --guided` additionally asks for a
-provider profile and emits non-secret YAML-shaped snippets. It never asks for
-an API token. Add secrets separately with a file, environment variable,
-keychain resolver, or hidden terminal entry.
+`setup` is non-interactive and idempotent: it creates only missing files with
+user-only permissions and repairs directory permissions. It does not alter an
+existing file; validation and `doctor` reject an unsafe existing mode rather
+than silently changing it. `setup --guided` additionally asks for a provider
+profile and emits non-secret YAML-shaped snippets. It never asks for an API
+token. Add secrets separately with a file, environment variable, keychain
+resolver, or hidden terminal entry.
 
 Validate before connecting an agent:
 
