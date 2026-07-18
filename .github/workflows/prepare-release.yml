@@ -10,7 +10,7 @@ on:
         type: boolean
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: project-context-release
@@ -24,11 +24,21 @@ jobs:
     environment: release
 
     steps:
+      - name: Generate a least-privilege release token
+        id: release-app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          repositories: project-context
+          permission-contents: write
+
       - name: Check out main with release credentials
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: main
           fetch-depth: 0
+          token: ${{ steps.release-app.outputs.token }}
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -53,5 +63,5 @@ jobs:
       - name: Prepare the release commit, tag, artifacts, and draft
         run: bun run release:prepare
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ steps.release-app.outputs.token }}
           RELEASE_1_0: ${{ inputs.release_1_0 }}
