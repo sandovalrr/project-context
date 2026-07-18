@@ -59,6 +59,22 @@ describe("release policy", () => {
     expect(verifyIndex).toBeLessThan(publishIndex);
   });
 
+  test("allows a protected retry against an explicit immutable release tag", async () => {
+    const workflow = parse(
+      await readFile(join(process.cwd(), ".github/workflows/publish-release.yml"), "utf8"),
+    );
+    const tagExpression = `\${{ github.event.release.tag_name || inputs.tag }}`;
+
+    expect(workflow.on.workflow_dispatch.inputs.tag).toMatchObject({
+      required: true,
+      type: "string",
+    });
+    for (const job of Object.values(workflow.jobs)) {
+      const checkout = job.steps.find(({ name }) => name === "Check out the immutable release tag");
+      expect(checkout.with.ref).toBe(tagExpression);
+    }
+  });
+
   test("keeps breaking changes pre-1.0 until the explicit 1.0 confirmation", () => {
     expect(normalizeReleaseType("0.4.2", "major", false)).toBe("minor");
     expect(normalizeReleaseType("0.4.2", "major", true)).toBe("major");

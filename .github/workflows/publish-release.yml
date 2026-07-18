@@ -3,6 +3,12 @@ name: Publish Release
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing immutable release tag to retry after a pre-publication failure
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -23,7 +29,7 @@ jobs:
       - name: Check out the immutable release tag
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -46,7 +52,7 @@ jobs:
         run: gh release download "$TAG" --dir release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
 
       - name: Verify tag, versions, checksums, SBOM, and package behavior
         id: assets
@@ -55,7 +61,7 @@ jobs:
           node scripts/test-package.mjs "release/$(node -e 'const fs=require("node:fs"); const value=JSON.parse(fs.readFileSync("release-verification.json")); process.stdout.write(value.tarball)')"
           node -e 'const fs=require("node:fs"); const value=JSON.parse(fs.readFileSync("release-verification.json")); fs.appendFileSync(process.env.GITHUB_OUTPUT, `tarball=release/${value.tarball}\nversion=${value.version}\n`)'
         env:
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
 
       - name: Publish the exact tarball to npm with OIDC provenance
         run: npm publish "$TARBALL" --access public
@@ -78,7 +84,7 @@ jobs:
       - name: Check out the immutable release tag
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -96,7 +102,7 @@ jobs:
           node -e 'const fs=require("node:fs"); const value=JSON.parse(fs.readFileSync("release-verification.json")); fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${value.version}\n`)'
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
 
       - name: Confirm npm exposes the exact version
         run: node scripts/verify-publication.mjs "$VERSION" npm
