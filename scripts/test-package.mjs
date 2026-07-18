@@ -7,8 +7,10 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const executeFile = promisify(execFile);
-const tarball = process.argv[2];
-if (!tarball) throw new Error("Pass the npm tarball path");
+const tarballArgument = process.argv[2];
+if (!tarballArgument) throw new Error("Pass the npm tarball path");
+
+const tarball = await realpath(tarballArgument);
 
 const directory = await mkdtemp(join(tmpdir(), "project-context-package-"));
 try {
