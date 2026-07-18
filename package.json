@@ -10,6 +10,7 @@
     "build": "bun build ./src/cli.ts --compile --outfile ./dist/project-context",
     "check": "bun run typecheck && bun run lint && bun test",
     "format": "biome check --write .",
+    "install:user": "bun run build && bun ./scripts/install-user.ts",
     "lint": "biome check .",
     "test": "bun test",
     "typecheck": "tsc --noEmit"

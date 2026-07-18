@@ -1,0 +1,6 @@
+interface:
+  display_name: "Project Issues"
+  short_description: "Route and manage issues safely by repository"
+  default_prompt: "Use $project-issues to resolve this repository issue context and handle the requested issue work safely."
+policy:
+  allow_implicit_invocation: true

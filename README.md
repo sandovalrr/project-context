@@ -24,4 +24,5 @@ Default host-local paths:
 The implementation targets Bun and TypeScript. See
 [`docs/architecture.md`](docs/architecture.md) for the system contract and
 [`docs/configuration.md`](docs/configuration.md) for the YAML model.
-
+See [`docs/installation.md`](docs/installation.md) for the user-scoped install
+and client-neutral MCP manifest.

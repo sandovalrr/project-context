@@ -121,15 +121,15 @@ explicit preview and confirmation.
 
 ## Installation boundaries
 
-Core installation and optional agent-client integration are separate:
+Core installation and agent-client registration are separate:
 
 ```text
-project-context install --user
-project-context integrate --client <client-name>
+bun run install:user
+project-context integration manifest
 ```
 
-The first installs the executable and shared skill. The second registers the
-global MCP server and a marker-delimited global agent policy. Both operations
-are backed up, idempotent, and reversible. ChatGPT web and hosted custom GPTs
-are outside version-one scope because they cannot use local stdio MCP,
-configuration, or credential storage.
+The first installs the executable and shared skill without replacing host
+configuration. The second prints a client-neutral stdio MCP manifest; the user
+adds it through the chosen local agent client's configuration mechanism. Hosted
+agent clients are outside version-one scope when they cannot use local stdio
+MCP, configuration, or credential storage.

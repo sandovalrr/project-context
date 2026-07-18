@@ -14,7 +14,7 @@ import {
   prepareIssueOperation,
   searchIssues,
 } from "./core/operations.ts";
-import { getPaths } from "./core/paths.ts";
+import { absolutePath, getPaths } from "./core/paths.ts";
 import type { IssueOperationRequest } from "./core/pending.ts";
 import { promptHidden } from "./core/prompt.ts";
 import { setupHostConfiguration } from "./core/setup.ts";
@@ -41,6 +41,7 @@ Usage:
   project-context issue prepare link --ref <reference> --url <issue-url>
   project-context issue apply <preview-token>
   project-context mcp
+  project-context integration manifest
   project-context --help
 `;
 
@@ -266,6 +267,18 @@ async function main(): Promise<void> {
   }
   if (command === "mcp") {
     await startProjectIssuesStdioServer();
+    return;
+  }
+  if (command === "integration" && subcommand === "manifest") {
+    print({
+      mcp: {
+        name: "project_issues",
+        command: absolutePath("~/.local/bin/project-context"),
+        args: ["mcp"],
+        transport: "stdio",
+      },
+      skill: absolutePath("~/.agents/skills/project-issues"),
+    });
     return;
   }
 
