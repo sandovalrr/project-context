@@ -110,15 +110,15 @@ export async function createPendingChange(
 }
 
 export async function readPendingChange(token: string): Promise<PendingChange> {
-  let value: unknown;
-  try {
-    value = JSON.parse(await readFile(pendingPath(token), "utf8"));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      throw new ProjectContextError("PREVIEW_NOT_FOUND", `Issue preview ${token} was not found`);
-    }
-    throw error;
-  }
+  const value: unknown = await readFile(pendingPath(token), "utf8")
+    .then((content) => JSON.parse(content))
+    .catch((error) => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new ProjectContextError("PREVIEW_NOT_FOUND", `Issue preview ${token} was not found`);
+      }
+      throw error;
+    });
+
   if (!value || typeof value !== "object") {
     throw new ProjectContextError("PREVIEW_INVALID", "Stored issue preview is invalid");
   }

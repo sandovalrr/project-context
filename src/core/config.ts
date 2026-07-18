@@ -21,14 +21,11 @@ function formatSchemaErrors(errors: ErrorObject[] | null | undefined): string {
 }
 
 async function parseYamlFile(path: string): Promise<unknown> {
-  let content: string;
-  try {
-    content = await readFile(path, "utf8");
-  } catch (error) {
+  const content = await readFile(path, "utf8").catch((error) => {
     throw new ProjectContextError("CONFIG_READ_FAILED", `Cannot read configuration ${path}`, {
       cause: error,
     });
-  }
+  });
 
   const document = parseDocument(content, { uniqueKeys: true });
   if (document.errors.length > 0) {

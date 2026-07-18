@@ -5,14 +5,12 @@ export async function requestJson<T>(
   url: string,
   init: RequestInit,
 ): Promise<T> {
-  let response: Response;
-  try {
-    response = await fetcher(url, init);
-  } catch (error) {
+  const response = await fetcher(url, init).catch((error) => {
     throw new ProjectContextError("PROVIDER_NETWORK_ERROR", `Provider request failed: ${url}`, {
       cause: error,
     });
-  }
+  });
+
   if (!response.ok) {
     throw new ProjectContextError(
       "PROVIDER_HTTP_ERROR",

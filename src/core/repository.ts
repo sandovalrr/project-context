@@ -48,19 +48,29 @@ function sameRepository(left: string, right: string): boolean {
   return left.localeCompare(right, undefined, { sensitivity: "accent" }) === 0;
 }
 
+function resolveOrigin(gitRoot: string): {
+  originRemote?: string;
+  normalizedOrigin?: string;
+} {
+  try {
+    const originRemote = runGit(gitRoot, ["remote", "get-url", "origin"]);
+    const normalizedOrigin = normalizeRemoteUrl(originRemote);
+
+    return { originRemote, normalizedOrigin };
+  } catch (error) {
+    if (!(error instanceof ProjectContextError) || error.code !== "GIT_COMMAND_FAILED") throw error;
+
+    return {};
+  }
+}
+
 export async function resolveRepository(
   config: ProjectsConfig,
   cwd = process.cwd(),
 ): Promise<ResolvedRepository> {
   const gitRoot = await realpath(runGit(cwd, ["rev-parse", "--show-toplevel"]));
-  let originRemote: string | undefined;
-  let normalizedOrigin: string | undefined;
-  try {
-    originRemote = runGit(gitRoot, ["remote", "get-url", "origin"]);
-    normalizedOrigin = normalizeRemoteUrl(originRemote);
-  } catch (error) {
-    if (!(error instanceof ProjectContextError) || error.code !== "GIT_COMMAND_FAILED") throw error;
-  }
+  const { originRemote, normalizedOrigin } = resolveOrigin(gitRoot);
+
   const matches: Array<{
     repositoryId: string;
     matchSource: ResolvedRepository["matchSource"];

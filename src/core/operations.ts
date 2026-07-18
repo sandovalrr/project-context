@@ -298,6 +298,25 @@ function nativeStatus(provider: ProjectProvider, canonical: CanonicalStatus) {
   return typeof mapping === "string" ? { state: mapping } : mapping;
 }
 
+function mappedLabels(current: string[], add: string[] = [], remove: string[] = []): string[] {
+  const retained = current.filter((label) => !remove.includes(label));
+
+  return [...new Set([...retained, ...add])];
+}
+
+async function applyMappedLabels(
+  adapter: IssueProviderAdapter,
+  identifier: string,
+  result: IssueSnapshot,
+  mapping: ReturnType<typeof nativeStatus>,
+): Promise<IssueSnapshot> {
+  if (!mapping.add_labels?.length && !mapping.remove_labels?.length) return result;
+
+  const labels = mappedLabels(result.labels, mapping.add_labels, mapping.remove_labels);
+
+  return adapter.update(identifier, { labels });
+}
+
 async function execute(
   adapter: IssueProviderAdapter,
   provider: ProjectProvider,
@@ -327,17 +346,13 @@ async function execute(
       if (!["open", "in_progress", "done", "canceled"].includes(canonical)) {
         throw new ProjectContextError("STATUS_INVALID", `Unknown canonical status ${canonical}`);
       }
+
       const mapping = nativeStatus(provider, canonical);
-      let result = mapping.state
+      const result = mapping.state
         ? await adapter.transition(request.identifier, mapping.state)
         : (currentIssue as IssueSnapshot);
-      if (mapping.add_labels?.length || mapping.remove_labels?.length) {
-        const labels = new Set(result.labels);
-        for (const label of mapping.remove_labels ?? []) labels.delete(label);
-        for (const label of mapping.add_labels ?? []) labels.add(label);
-        result = await adapter.update(request.identifier, { labels: [...labels] });
-      }
-      return result;
+
+      return applyMappedLabels(adapter, request.identifier, result, mapping);
     }
   }
 }

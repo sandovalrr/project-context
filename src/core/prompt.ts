@@ -1,5 +1,27 @@
 import { ProjectContextError } from "./errors.ts";
 
+type PromptInputResult =
+  | { kind: "continue"; value: string }
+  | { kind: "submit"; value: string }
+  | { kind: "cancel" };
+
+function consumePromptInput(input: string, value: string): PromptInputResult {
+  const character = input.at(0);
+  if (character === undefined) return { kind: "continue", value };
+  if (character === "\u0003") return { kind: "cancel" };
+  if (character === "\r" || character === "\n") return { kind: "submit", value };
+
+  const remaining = input.slice(character.length);
+  const nextValue =
+    character === "\u007f" || character === "\b"
+      ? value.slice(0, -1)
+      : character >= " "
+        ? `${value}${character}`
+        : value;
+
+  return consumePromptInput(remaining, nextValue);
+}
+
 export async function promptHidden(label: string): Promise<string> {
   if (!process.stdin.isTTY || !process.stdout.isTTY || !process.stdin.setRawMode) {
     throw new ProjectContextError(
@@ -14,33 +36,32 @@ export async function promptHidden(label: string): Promise<string> {
   process.stdin.resume();
 
   return new Promise<string>((resolve, reject) => {
-    let value = "";
     const cleanup = () => {
-      process.stdin.off("data", onData);
       process.stdin.setRawMode?.(false);
       process.stdin.pause();
       process.stdout.write("\n");
     };
-    const onData = (chunk: string | Buffer) => {
-      const text = chunk.toString();
-      for (const character of text) {
-        if (character === "\u0003") {
+
+    const listen = (value: string) => {
+      process.stdin.once("data", (chunk: string | Buffer) => {
+        const result = consumePromptInput(chunk.toString(), value);
+
+        if (result.kind === "cancel") {
           cleanup();
           reject(new ProjectContextError("PROMPT_CANCELED", "Secret entry canceled"));
           return;
         }
-        if (character === "\r" || character === "\n") {
+
+        if (result.kind === "submit") {
           cleanup();
-          resolve(value);
+          resolve(result.value);
           return;
         }
-        if (character === "\u007f" || character === "\b") {
-          value = value.slice(0, -1);
-          continue;
-        }
-        if (character >= " ") value += character;
-      }
+
+        listen(result.value);
+      });
     };
-    process.stdin.on("data", onData);
+
+    listen("");
   });
 }

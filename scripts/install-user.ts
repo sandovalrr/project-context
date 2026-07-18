@@ -3,6 +3,24 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { setupHostConfiguration } from "../src/core/setup.ts";
 
+async function setupConfiguration(home: string) {
+  const previousConfig = process.env.PROJECT_CONTEXT_CONFIG_DIR;
+  const previousState = process.env.PROJECT_CONTEXT_STATE_DIR;
+
+  process.env.PROJECT_CONTEXT_CONFIG_DIR = join(home, ".agents", "config", "project-context");
+  process.env.PROJECT_CONTEXT_STATE_DIR = join(home, ".local", "state", "project-context");
+
+  try {
+    return await setupHostConfiguration();
+  } finally {
+    if (previousConfig === undefined) delete process.env.PROJECT_CONTEXT_CONFIG_DIR;
+    else process.env.PROJECT_CONTEXT_CONFIG_DIR = previousConfig;
+
+    if (previousState === undefined) delete process.env.PROJECT_CONTEXT_STATE_DIR;
+    else process.env.PROJECT_CONTEXT_STATE_DIR = previousState;
+  }
+}
+
 export async function installUser(
   home = process.env.PROJECT_CONTEXT_INSTALL_HOME ?? homedir(),
   sources: { binary?: string; skill?: string } = {},
@@ -33,19 +51,8 @@ export async function installUser(
   await chmod(temporaryBinary, 0o755);
   await rename(temporaryBinary, targetBinary);
 
-  const previousConfig = process.env.PROJECT_CONTEXT_CONFIG_DIR;
-  const previousState = process.env.PROJECT_CONTEXT_STATE_DIR;
-  process.env.PROJECT_CONTEXT_CONFIG_DIR = join(home, ".agents", "config", "project-context");
-  process.env.PROJECT_CONTEXT_STATE_DIR = join(home, ".local", "state", "project-context");
-  let setup: Awaited<ReturnType<typeof setupHostConfiguration>>;
-  try {
-    setup = await setupHostConfiguration();
-  } finally {
-    if (previousConfig === undefined) delete process.env.PROJECT_CONTEXT_CONFIG_DIR;
-    else process.env.PROJECT_CONTEXT_CONFIG_DIR = previousConfig;
-    if (previousState === undefined) delete process.env.PROJECT_CONTEXT_STATE_DIR;
-    else process.env.PROJECT_CONTEXT_STATE_DIR = previousState;
-  }
+  const setup = await setupConfiguration(home);
+
   return {
     executable: targetBinary,
     skill: targetSkill,
