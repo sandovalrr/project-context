@@ -58,6 +58,7 @@ describe("release policy", () => {
     expect(installIndex).toBeLessThan(verifyIndex);
     expect(verifyIndex).toBeLessThan(publishIndex);
     expect(steps[verifyIndex]?.run).toContain("realpath");
+    expect(steps[publishIndex]?.run).toContain("realpath");
   });
 
   test("allows a protected retry against an explicit immutable release tag", async () => {

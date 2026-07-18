@@ -65,7 +65,7 @@ jobs:
           TAG: ${{ github.event.release.tag_name || inputs.tag }}
 
       - name: Publish the exact tarball to npm with OIDC provenance
-        run: npm publish "$TARBALL" --access public
+        run: npm publish "$(realpath "$TARBALL")" --access public
         env:
           TARBALL: ${{ steps.assets.outputs.tarball }}
 
