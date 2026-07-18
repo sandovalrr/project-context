@@ -19,6 +19,7 @@ interface LinearIssue {
   state: { id: string; name: string };
   team?: { id: string };
   project?: { id: string } | null;
+  labels?: { nodes: Array<{ name: string }> };
 }
 
 export class LinearIssuesAdapter implements IssueProviderAdapter {
@@ -61,6 +62,7 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
       title: issue.title,
       description: issue.description,
       status: issue.state.name,
+      labels: issue.labels?.nodes.map((label) => label.name) ?? [],
       url: issue.url,
       updatedAt: issue.updatedAt,
       version: versionOf(issue.updatedAt, issue.id),
@@ -86,7 +88,7 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
       `query Search($query: String!, $first: Int!) {
         issueSearch(query: $query, first: $first) {
           nodes {
-            id identifier title description url updatedAt state { id name }
+            id identifier title description url updatedAt state { id name } labels { nodes { name } }
             team { id }
             project { id }
           }
@@ -105,7 +107,7 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
   async get(identifier: string): Promise<IssueSnapshot> {
     const data = await this.#graphql<{ issue: LinearIssue }>(
       `query Issue($id: String!) {
-        issue(id: $id) { id identifier title description url updatedAt state { id name } }
+        issue(id: $id) { id identifier title description url updatedAt state { id name } labels { nodes { name } } }
       }`,
       { id: identifier },
     );
@@ -127,7 +129,7 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
       `mutation Create($input: IssueCreateInput!) {
         issueCreate(input: $input) {
           success
-          issue { id identifier title description url updatedAt state { id name } }
+          issue { id identifier title description url updatedAt state { id name } labels { nodes { name } } }
         }
       }`,
       variables,
@@ -143,7 +145,7 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
       `mutation Update($id: String!, $input: IssueUpdateInput!) {
         issueUpdate(id: $id, input: $input) {
           success
-          issue { id identifier title description url updatedAt state { id name } }
+          issue { id identifier title description url updatedAt state { id name } labels { nodes { name } } }
         }
       }`,
       { id: identifier, input },
@@ -186,5 +188,9 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
       );
     }
     return this.update(identifier, { stateId: matches[0]?.id } as IssueUpdateInput);
+  }
+
+  async link(identifier: string, targetUrl: string): Promise<void> {
+    await this.comment(identifier, `Related issue: ${targetUrl}`);
   }
 }

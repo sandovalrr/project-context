@@ -8,7 +8,14 @@ import {
 import { resolveProjectContext } from "./core/context.ts";
 import { addFileCredential, resolveCredentialAlias } from "./core/credentials.ts";
 import { errorMessage, ProjectContextError } from "./core/errors.ts";
+import {
+  applyIssueOperation,
+  getIssue,
+  prepareIssueOperation,
+  searchIssues,
+} from "./core/operations.ts";
 import { getPaths } from "./core/paths.ts";
+import type { IssueOperationRequest } from "./core/pending.ts";
 import { promptHidden } from "./core/prompt.ts";
 import { setupHostConfiguration } from "./core/setup.ts";
 
@@ -23,12 +30,71 @@ Usage:
   project-context config migrate
   project-context credential add <alias> [--field <name>] [--replace]
   project-context credential test <alias>
+  project-context issue search <query> [--provider <alias> | --all] [--limit <n>]
+  project-context issue get <reference> [--provider <alias>]
+  project-context issue prepare create --title <title> [--description <text>] [--preset <name>]
+  project-context issue prepare update --ref <reference> [--title <title>] [--description <text>]
+  project-context issue prepare comment --ref <reference> --body <text>
+  project-context issue prepare transition --ref <reference> --status <canonical-status>
+  project-context issue prepare close|reopen --ref <reference>
+  project-context issue prepare link --ref <reference> --url <issue-url>
+  project-context issue apply <preview-token>
   project-context --help
 `;
 
 function option(args: string[], name: string): string | undefined {
   const index = args.indexOf(name);
   return index >= 0 ? args[index + 1] : undefined;
+}
+
+function requiredOption(args: string[], name: string): string {
+  const value = option(args, name);
+  if (!value) throw new ProjectContextError("ARGUMENT_REQUIRED", `${name} is required`);
+  return value;
+}
+
+function issuePrepareRequest(args: string[]): IssueOperationRequest {
+  const operation = args[2];
+  if (operation === "create") {
+    const input: Record<string, unknown> = { title: requiredOption(args, "--title") };
+    const description = option(args, "--description");
+    const preset = option(args, "--preset");
+    if (description !== undefined) input.description = description;
+    return {
+      operation,
+      input,
+      ...(preset ? { preset } : {}),
+    };
+  }
+  const identifier = requiredOption(args, "--ref");
+  if (operation === "update") {
+    const input: Record<string, unknown> = {};
+    for (const [flag, field] of [
+      ["--title", "title"],
+      ["--description", "description"],
+    ] as const) {
+      const value = option(args, flag);
+      if (value !== undefined) input[field] = value;
+    }
+    if (Object.keys(input).length === 0) {
+      throw new ProjectContextError(
+        "ARGUMENT_REQUIRED",
+        "update requires at least one changed field",
+      );
+    }
+    return { operation, identifier, input };
+  }
+  if (operation === "comment") {
+    return { operation, identifier, body: requiredOption(args, "--body") };
+  }
+  if (operation === "transition") {
+    return { operation, identifier, status: requiredOption(args, "--status") };
+  }
+  if (operation === "close" || operation === "reopen") return { operation, identifier };
+  if (operation === "link") {
+    return { operation, identifier, targetUrl: requiredOption(args, "--url") };
+  }
+  throw new ProjectContextError("OPERATION_UNKNOWN", `Unknown issue operation ${operation ?? ""}`);
 }
 
 function print(value: unknown): void {
@@ -145,6 +211,55 @@ async function main(): Promise<void> {
     const credentials = await loadCredentialConfig(getPaths().credentialsFile);
     const resolved = await resolveCredentialAlias(credentials, alias);
     print({ alias, valid: true, fields: Object.keys(resolved).sort() });
+    return;
+  }
+  if (command === "issue" && subcommand === "search") {
+    const query = args[2];
+    if (!query) throw new ProjectContextError("ARGUMENT_REQUIRED", "issue search requires a query");
+    const limitValue = option(args, "--limit");
+    const limit = limitValue === undefined ? undefined : Number.parseInt(limitValue, 10);
+    const provider = option(args, "--provider");
+    if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 100)) {
+      throw new ProjectContextError("ARGUMENT_INVALID", "--limit must be between 1 and 100");
+    }
+    print(
+      await searchIssues(query, {
+        cwd: option(args, "--cwd") ?? process.cwd(),
+        ...(provider ? { provider } : {}),
+        all: args.includes("--all"),
+        ...(limit === undefined ? {} : { limit }),
+      }),
+    );
+    return;
+  }
+  if (command === "issue" && subcommand === "get") {
+    const reference = args[2];
+    if (!reference)
+      throw new ProjectContextError("ARGUMENT_REQUIRED", "issue get requires a reference");
+    const provider = option(args, "--provider");
+    print(
+      await getIssue(reference, {
+        cwd: option(args, "--cwd") ?? process.cwd(),
+        ...(provider ? { provider } : {}),
+      }),
+    );
+    return;
+  }
+  if (command === "issue" && subcommand === "prepare") {
+    const provider = option(args, "--provider");
+    print(
+      await prepareIssueOperation(issuePrepareRequest(args), {
+        cwd: option(args, "--cwd") ?? process.cwd(),
+        ...(provider ? { provider } : {}),
+      }),
+    );
+    return;
+  }
+  if (command === "issue" && subcommand === "apply") {
+    const token = args[2];
+    if (!token)
+      throw new ProjectContextError("ARGUMENT_REQUIRED", "issue apply requires a preview token");
+    print(await applyIssueOperation(token, { cwd: option(args, "--cwd") ?? process.cwd() }));
     return;
   }
 

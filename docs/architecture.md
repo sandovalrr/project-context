@@ -11,7 +11,7 @@ out of scope.
 ## Components
 
 ```text
-Codex / local MCP client
+Agent / local MCP client
           |
           v
 project_issues MCP server  <-->  project-issues skill
@@ -31,7 +31,7 @@ shared project-context core
 ```
 
 The executable exposes the same core through a diagnostic CLI and a stdio MCP
-server. Codex sees one provider-neutral tool set rather than overlapping tools
+server. An agent sees one provider-neutral tool set rather than overlapping tools
 from multiple issue systems.
 
 ## Repository identity
@@ -121,11 +121,11 @@ explicit preview and confirmation.
 
 ## Installation boundaries
 
-Client-neutral installation and Codex integration are separate:
+Core installation and optional agent-client integration are separate:
 
 ```text
 project-context install --user
-project-context integrate codex
+project-context integrate --client <client-name>
 ```
 
 The first installs the executable and shared skill. The second registers the
@@ -133,4 +133,3 @@ global MCP server and a marker-delimited global agent policy. Both operations
 are backed up, idempotent, and reversible. ChatGPT web and hosted custom GPTs
 are outside version-one scope because they cannot use local stdio MCP,
 configuration, or credential storage.
-

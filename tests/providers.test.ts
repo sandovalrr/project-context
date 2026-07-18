@@ -60,6 +60,7 @@ describe("GitHub Issues adapter", () => {
       title: "Broken build",
       body: "Details",
       state: "open",
+      labels: [{ name: "bug" }],
       html_url: "https://github.com/acme/payments/issues/12",
       updated_at: "2026-07-18T10:00:00Z",
     };
@@ -100,6 +101,7 @@ describe("Linear adapter", () => {
       url: "https://linear.app/workspace/issue/ENG-1",
       updatedAt: "2026-07-18T10:00:00Z",
       state: { id: "state-1", name: "Backlog" },
+      labels: { nodes: [] },
     };
     const { fetcher, requests } = mockFetch([
       {
@@ -139,6 +141,7 @@ describe("Jira Cloud adapter", () => {
           content: [{ type: "paragraph", content: [{ type: "text", text: "Details" }] }],
         },
         status: { name: "To Do" },
+        labels: [],
         updated: "2026-07-18T10:00:00.000+0000",
       },
     };

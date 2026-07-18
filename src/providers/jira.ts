@@ -18,6 +18,7 @@ interface JiraIssue {
     description?: unknown;
     status: { name: string };
     updated: string;
+    labels?: string[];
   };
 }
 
@@ -79,6 +80,7 @@ export class JiraCloudIssuesAdapter implements IssueProviderAdapter {
       title: issue.fields.summary,
       description: adfText(issue.fields.description),
       status: issue.fields.status.name,
+      labels: issue.fields.labels ?? [],
       url: `${this.#baseUrl}/browse/${issue.key}`,
       updatedAt: issue.fields.updated,
       version: versionOf(issue.fields.updated, issue.id),
@@ -105,7 +107,7 @@ export class JiraCloudIssuesAdapter implements IssueProviderAdapter {
     const data = await this.#request<{ issues: JiraIssue[] }>("/rest/api/3/search/jql", "POST", {
       jql,
       maxResults: limit,
-      fields: ["summary", "description", "status", "updated"],
+      fields: ["summary", "description", "status", "updated", "labels"],
     });
     return data.issues.map((issue) => this.#snapshot(issue));
   }
@@ -113,7 +115,7 @@ export class JiraCloudIssuesAdapter implements IssueProviderAdapter {
   async get(identifier: string): Promise<IssueSnapshot> {
     return this.#snapshot(
       await this.#request<JiraIssue>(
-        `/rest/api/3/issue/${encodeURIComponent(identifier)}?fields=summary,description,status,updated`,
+        `/rest/api/3/issue/${encodeURIComponent(identifier)}?fields=summary,description,status,updated,labels`,
       ),
     );
   }
@@ -173,5 +175,19 @@ export class JiraCloudIssuesAdapter implements IssueProviderAdapter {
       transition: { id: matches[0]?.id },
     });
     return this.get(identifier);
+  }
+
+  async link(identifier: string, targetUrl: string): Promise<void> {
+    const target = new URL(targetUrl);
+    const key = /^\/browse\/([^/]+)$/.exec(target.pathname)?.[1];
+    if (target.hostname === new URL(this.#baseUrl).hostname && key) {
+      await this.#request("/rest/api/3/issueLink", "POST", {
+        type: { name: "Relates" },
+        inwardIssue: { key: identifier },
+        outwardIssue: { key },
+      });
+      return;
+    }
+    await this.comment(identifier, `Related issue: ${targetUrl}`);
   }
 }

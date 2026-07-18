@@ -59,7 +59,7 @@ Creating an issue without a requested state uses the provider's normal default.
 
 Provider entries may declare required fields, defaults, and named presets.
 Presets that change labels, priority, workflow, or templates are explicit.
-Codex may suggest a preset but cannot silently select one.
+An agent may suggest a preset but cannot silently select one.
 
 Markdown templates are host-local and reusable. The resolver validates required
 template sections and variables before preparing the create operation.
@@ -80,4 +80,3 @@ temporary context.
 
 Never store credentials, descriptions, comments, attachments, or other issue
 content in the audit log.
-

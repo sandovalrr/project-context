@@ -16,6 +16,7 @@ interface GitHubIssue {
   state: string;
   html_url: string;
   updated_at: string;
+  labels?: Array<string | { name?: string }>;
   pull_request?: unknown;
 }
 
@@ -66,6 +67,9 @@ export class GitHubIssuesAdapter implements IssueProviderAdapter {
       title: issue.title,
       description: issue.body,
       status: issue.state,
+      labels: (issue.labels ?? []).flatMap((label) =>
+        typeof label === "string" ? [label] : label.name ? [label.name] : [],
+      ),
       url: issue.html_url,
       updatedAt: issue.updated_at,
       version: versionOf(issue.updated_at, String(issue.id)),
@@ -132,5 +136,9 @@ export class GitHubIssuesAdapter implements IssueProviderAdapter {
         state: nativeStatus,
       }),
     );
+  }
+
+  async link(identifier: string, targetUrl: string): Promise<void> {
+    await this.comment(identifier, `Related issue: ${targetUrl}`);
   }
 }

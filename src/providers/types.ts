@@ -15,6 +15,7 @@ export interface IssueSnapshot {
   title: string;
   description: string | null;
   status: string;
+  labels: string[];
   url: string;
   updatedAt: string;
   version: string;
@@ -46,4 +47,5 @@ export interface IssueProviderAdapter {
   update(identifier: string, input: IssueUpdateInput): Promise<IssueSnapshot>;
   comment(identifier: string, body: string): Promise<void>;
   transition(identifier: string, nativeStatus: string): Promise<IssueSnapshot>;
+  link(identifier: string, targetUrl: string): Promise<void>;
 }

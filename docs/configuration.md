@@ -42,7 +42,7 @@ providers:
       host: github.com
 
 projects:
-  github.com/example-user/example:
+  github.com/example/example-repository:
     aliases:
       remotes: []
       paths: []
@@ -155,4 +155,3 @@ temporary sessions but are not the default.
 All configuration writes acquire a lock, validate the complete result, create a
 timestamped backup, and replace atomically. The CLI never commits, pulls, pushes,
 or otherwise synchronizes configuration through Git.
-
