@@ -125,9 +125,10 @@ asset, or overwrite a published version.
 - npm failure: leave the GitHub release published, correct trusted-publisher or
   environment configuration, and rerun the failed publish workflow. The exact
   tarball is reused.
-- MCP Registry failure after npm success: rerun the failed workflow. npm will
-  reject a duplicate version, so rerun only the registry login/publish/verify
-  steps or use a workflow rerun from the failed job when GitHub supports it.
+- MCP Registry failure after npm success: use **Re-run failed jobs**. Registry
+  publication is a separate job that downloads and revalidates the original
+  assets, confirms npm, and retries only registry login/publish/verify; it does
+  not attempt a duplicate npm publication.
 - Defective public release: deprecate the npm version when appropriate and
   publish a new fix-forward version. Do not edit history.
 - Compromised release: follow private security reporting, revoke affected

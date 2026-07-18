@@ -213,15 +213,20 @@ async function readEncryptedPendingChange(path: string, token: string): Promise<
       `Issue preview ${token} must be stored in a regular mode-0600 file`,
     );
   }
-  const value: unknown = await readFile(path, "utf8")
-    .then((content) => JSON.parse(content))
-    .catch((error) => {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        throw new ProjectContextError("PREVIEW_NOT_FOUND", `Issue preview ${token} was not found`);
-      }
-      throw error;
+  const content = await readFile(path, "utf8");
+  const value = await Promise.resolve(content)
+    .then((serialized): EncryptedPendingChange => {
+      const parsed: unknown = JSON.parse(serialized);
+      assertEnvelope(parsed, token);
+      return parsed;
+    })
+    .catch(async () => {
+      await rm(path, { force: true });
+      throw new ProjectContextError(
+        "PREVIEW_TAMPERED",
+        "Stored issue preview has an invalid envelope and was invalidated",
+      );
     });
-  assertEnvelope(value, token);
   return decryptPendingChange(value, path);
 }
 
@@ -369,8 +374,6 @@ export async function validatePendingChange(
 }
 
 export async function consumePendingChange(token: string): Promise<void> {
-  await Promise.all([
-    rm(preparedPath(token), { force: true }),
-    rm(applyingPath(token), { force: true }),
-  ]);
+  await rm(applyingPath(token), { force: true });
+  await rm(preparedPath(token), { force: true });
 }

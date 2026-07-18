@@ -32,7 +32,7 @@ try {
   const transport = new StdioClientTransport({ command: process.execPath, args: [mcpPath] });
   await client.connect(transport);
   const tools = await client.listTools();
-  const names = tools.tools.map((tool) => tool.name).sort();
+  const names = tools.tools.map((tool) => tool.name).toSorted();
   const expected = [
     "apply_issue_change",
     "get_issue",

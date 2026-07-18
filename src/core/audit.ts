@@ -1,8 +1,8 @@
 import { appendFile, lstat, mkdir, readFile, rename, rm, stat } from "node:fs/promises";
 import { dirname } from "node:path";
+import { PACKAGE_VERSION } from "../metadata.ts";
 import { ProjectContextError } from "./errors.ts";
 import { getPaths } from "./paths.ts";
-import { PACKAGE_VERSION } from "../metadata.ts";
 
 export interface AuditEvent {
   operation: string;
@@ -67,6 +67,12 @@ async function shiftRotations(index: number): Promise<void> {
 }
 
 async function rotateAudit(): Promise<void> {
+  await Promise.all([
+    assertAuditFileSafe(getPaths().auditFile),
+    ...Array.from({ length: AUDIT_RETAINED_FILES }, (_, offset) =>
+      assertAuditFileSafe(rotationPath(offset + 1)),
+    ),
+  ]);
   await rm(rotationPath(AUDIT_RETAINED_FILES), { force: true });
   await shiftRotations(AUDIT_RETAINED_FILES - 1);
 }
@@ -85,6 +91,7 @@ export async function appendAuditEvent(event: AuditEvent): Promise<void> {
 }
 
 async function readAuditFile(path: string): Promise<StoredAuditEvent[]> {
+  await assertAuditFileSafe(path);
   const content = await readFile(path, "utf8").catch((error) => {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return "";
     throw error;

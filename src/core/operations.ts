@@ -382,36 +382,40 @@ async function applyClaimedIssueOperation(
     ...(currentIssue ? { issueVersion: currentIssue.version } : {}),
   });
 
-  try {
-    assertExpectedIdentity(current.profile, current.identity);
-    const result = await execute(current.adapter, current.provider, pending.request, currentIssue);
-    await consumePendingChange(pending.token);
-    await appendAuditEvent({
-      operation: pending.request.operation,
-      outcome: "success",
-      repositoryId: current.repositoryId,
-      providerAlias: current.providerAlias,
-      providerType: current.provider.type,
-      identityId: current.identity.principalId,
-      issueIdentifier: result.identifier,
-      issueId: result.id,
-    });
-    return result;
-  } catch (error) {
-    await appendAuditEvent({
-      operation: pending.request.operation,
-      outcome: "failure",
-      repositoryId: current.repositoryId,
-      providerAlias: current.providerAlias,
-      providerType: current.provider.type,
-      identityId: current.identity.principalId,
-      ...(currentIssue
-        ? { issueIdentifier: currentIssue.identifier, issueId: currentIssue.id }
-        : {}),
-      errorCode: error instanceof ProjectContextError ? error.code : "UNEXPECTED",
-    });
-    throw error;
-  }
+  const executeWithFailureAudit = async () => {
+    try {
+      assertExpectedIdentity(current.profile, current.identity);
+      return await execute(current.adapter, current.provider, pending.request, currentIssue);
+    } catch (error) {
+      await appendAuditEvent({
+        operation: pending.request.operation,
+        outcome: "failure",
+        repositoryId: current.repositoryId,
+        providerAlias: current.providerAlias,
+        providerType: current.provider.type,
+        identityId: current.identity.principalId,
+        ...(currentIssue
+          ? { issueIdentifier: currentIssue.identifier, issueId: currentIssue.id }
+          : {}),
+        errorCode: error instanceof ProjectContextError ? error.code : "UNEXPECTED",
+      });
+      throw error;
+    }
+  };
+
+  const result = await executeWithFailureAudit();
+  await appendAuditEvent({
+    operation: pending.request.operation,
+    outcome: "success",
+    repositoryId: current.repositoryId,
+    providerAlias: current.providerAlias,
+    providerType: current.provider.type,
+    identityId: current.identity.principalId,
+    issueIdentifier: result.identifier,
+    issueId: result.id,
+  });
+  await consumePendingChange(pending.token);
+  return result;
 }
 
 export async function applyIssueOperation(

@@ -13,8 +13,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish:
-    name: Publish exact release artifact
+  publish-npm:
+    name: Publish exact npm artifact
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: release
@@ -55,6 +55,42 @@ jobs:
           TARBALL: ${{ steps.assets.outputs.tarball }}
 
       - name: Verify npm publication
+        run: node scripts/verify-publication.mjs "$VERSION" npm
+        env:
+          VERSION: ${{ steps.assets.outputs.version }}
+
+  publish-registry:
+    name: Publish MCP Registry metadata
+    needs: publish-npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: release
+
+    steps:
+      - name: Check out the immutable release tag
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Download and verify release assets
+        id: assets
+        run: |
+          gh release download "$TAG" --dir release
+          node scripts/verify-release.mjs release "$TAG" > release-verification.json
+          node -e 'const fs=require("node:fs"); const value=JSON.parse(fs.readFileSync("release-verification.json")); fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${value.version}\n`)'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+
+      - name: Confirm npm exposes the exact version
         run: node scripts/verify-publication.mjs "$VERSION" npm
         env:
           VERSION: ${{ steps.assets.outputs.version }}

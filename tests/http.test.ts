@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import { requestJson } from "../src/providers/http.ts";
 
 const readPolicy = {
@@ -11,13 +11,18 @@ function asFetch(fetcher: () => Promise<Response>): typeof fetch {
   return fetcher as unknown as typeof fetch;
 }
 
+function responseSequence(responses: Response[]): typeof fetch {
+  const sequence = responses.values();
+  return asFetch(async () => {
+    const next = sequence.next();
+    if (next.done) throw new Error("No response remains in the test sequence");
+    return next.value;
+  });
+}
+
 describe("provider HTTP safety", () => {
   test("rejects non-HTTPS and unapproved provider origins before sending credentials", async () => {
-    const requests: string[] = [];
-    const fetcher = (async (url: string | URL | Request) => {
-      requests.push(String(url));
-      return new Response("{}");
-    }) as typeof fetch;
+    const fetcher = mock(async () => new Response("{}")) as unknown as typeof fetch;
 
     await expect(
       requestJson(fetcher, "http://api.example.test/issues", {}, readPolicy),
@@ -25,26 +30,28 @@ describe("provider HTTP safety", () => {
     await expect(
       requestJson(fetcher, "https://attacker.example/issues", {}, readPolicy),
     ).rejects.toThrow("approved HTTPS origin");
-    expect(requests).toEqual([]);
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   test("retries transient reads but never retries writes", async () => {
-    const readResponses = [
-      new Response("unavailable", { status: 503, headers: { "Retry-After": "0" } }),
-      new Response('{"ok":true}', { status: 200 }),
-    ];
-    const readFetcher = asFetch(async () => readResponses.shift() as Response);
+    const readFetcher = mock(
+      responseSequence([
+        new Response("unavailable", { status: 503, headers: { "Retry-After": "0" } }),
+        new Response('{"ok":true}', { status: 200 }),
+      ]),
+    ) as unknown as typeof fetch;
 
     await expect(
       requestJson(readFetcher, "https://api.example.test/issues", {}, readPolicy),
     ).resolves.toEqual({ ok: true });
-    expect(readResponses).toHaveLength(0);
+    expect(readFetcher).toHaveBeenCalledTimes(2);
 
-    const writeResponses = [
-      new Response("unavailable", { status: 503 }),
-      new Response('{"ok":true}', { status: 200 }),
-    ];
-    const writeFetcher = asFetch(async () => writeResponses.shift() as Response);
+    const writeFetcher = mock(
+      responseSequence([
+        new Response("unavailable", { status: 503 }),
+        new Response('{"ok":true}', { status: 200 }),
+      ]),
+    ) as unknown as typeof fetch;
     await expect(
       requestJson(
         writeFetcher,
@@ -53,7 +60,7 @@ describe("provider HTTP safety", () => {
         { ...readPolicy, access: "write" },
       ),
     ).rejects.toThrow("returned 503");
-    expect(writeResponses).toHaveLength(1);
+    expect(writeFetcher).toHaveBeenCalledTimes(1);
   });
 
   test("limits response size and redacts request details from errors", async () => {

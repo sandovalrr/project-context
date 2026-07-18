@@ -11,6 +11,7 @@ import {
 import { getPaths } from "../src/core/paths.ts";
 import { setupHostConfiguration } from "../src/core/setup.ts";
 import type { CredentialDefinition, CredentialsConfig } from "../src/core/types.ts";
+import { withTemporaryDirectory } from "./helpers/temporary.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -48,12 +49,11 @@ describe("credential resolution", () => {
   });
 
   test("rejects literal credentials in host configuration", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "project-context-credentials-"));
-    temporaryDirectories.push(directory);
-    const path = join(directory, "credentials.yaml");
-    await writeFile(
-      path,
-      `version: 1
+    await withTemporaryDirectory("project-context-credentials-", async (directory) => {
+      const path = join(directory, "credentials.yaml");
+      await writeFile(
+        path,
+        `version: 1
 credentials:
   unsafe:
     fields:
@@ -61,9 +61,10 @@ credentials:
         source: literal
         value: plaintext-secret
 `,
-    );
+      );
 
-    await expect(loadCredentialConfig(path)).rejects.toThrow("Invalid credential registry");
+      await expect(loadCredentialConfig(path)).rejects.toThrow("Invalid credential registry");
+    });
   });
 
   test("rejects a secret file readable by group or others", async () => {

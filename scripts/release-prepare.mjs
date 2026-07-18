@@ -153,6 +153,7 @@ async function createVerifiedReleaseCommit(context) {
   );
   await run("git", ["fetch", "origin", branch], context.cwd, context.env);
   await run("git", ["reset", "--hard", commit.sha], context.cwd, context.env);
+  // semantic-release tags nextRelease.gitHead after prepare; the verified API commit replaces it.
   context.nextRelease.gitHead = commit.sha;
 }
 

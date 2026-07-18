@@ -110,10 +110,19 @@ describe("two-phase issue changes", () => {
     const pending = await fixture();
     const path = join(getPaths().pendingDirectory, `${pending.token}.json`);
     const stored = JSON.parse(await readFile(path, "utf8"));
-    stored.ciphertext = `${stored.ciphertext.slice(0, -2)}AA`;
-    await writeFile(path, JSON.stringify(stored));
+    const modified = { ...stored, ciphertext: `${stored.ciphertext.slice(0, -2)}AA` };
+    await writeFile(path, JSON.stringify(modified));
 
     await expect(readPendingChange(pending.token)).rejects.toThrow("integrity check");
+    await expect(readFile(path)).rejects.toThrow();
+  });
+
+  test("deletes malformed preview envelopes", async () => {
+    const pending = await fixture();
+    const path = join(getPaths().pendingDirectory, `${pending.token}.json`);
+    await writeFile(path, "not-json");
+
+    await expect(readPendingChange(pending.token)).rejects.toThrow("invalid envelope");
     await expect(readFile(path)).rejects.toThrow();
   });
 

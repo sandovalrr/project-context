@@ -1,16 +1,10 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { describe, expect, test } from "bun:test";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { packageVersionsFromLockDiff } from "../scripts/check-package-age.mjs";
 import { normalizeReleaseType } from "../scripts/release-analyzer.mjs";
 import { synchronizeReleaseVersion } from "../scripts/release-prepare.mjs";
-
-const temporaryDirectories = [];
-
-afterEach(async () => {
-  await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true })));
-});
+import { withTemporaryDirectory } from "./helpers/temporary.ts";
 
 describe("release policy", () => {
   test("keeps breaking changes pre-1.0 until the explicit 1.0 confirmation", () => {
@@ -30,22 +24,22 @@ describe("release policy", () => {
   });
 
   test("synchronizes package and registry versions from one release version", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "project-context-release-"));
-    temporaryDirectories.push(directory);
-    await Promise.all([
-      writeFile(join(directory, "package.json"), '{"name":"example","version":"0.0.0"}\n'),
-      writeFile(
-        join(directory, "server.json"),
-        '{"name":"io.github.example/server","version":"0.0.0","packages":[{"version":"0.0.0"}]}\n',
-      ),
-    ]);
+    await withTemporaryDirectory("project-context-release-", async (directory) => {
+      await Promise.all([
+        writeFile(join(directory, "package.json"), '{"name":"example","version":"0.0.0"}\n'),
+        writeFile(
+          join(directory, "server.json"),
+          '{"name":"io.github.example/server","version":"0.0.0","packages":[{"version":"0.0.0"}]}\n',
+        ),
+      ]);
 
-    await synchronizeReleaseVersion("0.1.0", directory);
-    expect(JSON.parse(await readFile(join(directory, "package.json"), "utf8")).version).toBe(
-      "0.1.0",
-    );
-    const server = JSON.parse(await readFile(join(directory, "server.json"), "utf8"));
-    expect(server.version).toBe("0.1.0");
-    expect(server.packages[0].version).toBe("0.1.0");
+      await synchronizeReleaseVersion("0.1.0", directory);
+      expect(JSON.parse(await readFile(join(directory, "package.json"), "utf8")).version).toBe(
+        "0.1.0",
+      );
+      const server = JSON.parse(await readFile(join(directory, "server.json"), "utf8"));
+      expect(server.version).toBe("0.1.0");
+      expect(server.packages[0].version).toBe("0.1.0");
+    });
   });
 });

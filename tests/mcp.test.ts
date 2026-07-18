@@ -1,19 +1,16 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { ListRootsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { createProjectIssuesServer } from "../src/mcp.ts";
-
-const temporaryDirectories: string[] = [];
+import { withTemporaryDirectory } from "./helpers/temporary.ts";
 
 afterEach(async () => {
   delete process.env.PROJECT_CONTEXT_CONFIG_DIR;
   delete process.env.PROJECT_CONTEXT_STATE_DIR;
-  await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true })));
 });
 
 describe("provider-neutral MCP server", () => {
@@ -27,7 +24,7 @@ describe("provider-neutral MCP server", () => {
     expect(client.getServerVersion()).toMatchObject({ name: "project-context" });
 
     const tools = await client.listTools();
-    expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
+    expect(tools.tools.map((tool) => tool.name).toSorted()).toEqual([
       "apply_issue_change",
       "get_issue",
       "prepare_issue_change",
@@ -41,6 +38,12 @@ describe("provider-neutral MCP server", () => {
           properties: {
             providerAlias: { type: "string" },
             issue: { type: "object" },
+          },
+        },
+        error: {
+          properties: {
+            code: { type: "string" },
+            message: { type: "string" },
           },
         },
       },
@@ -57,71 +60,76 @@ describe("provider-neutral MCP server", () => {
   });
 
   test("initializes without configuration and returns an actionable setup error", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "project-context-mcp-"));
-    temporaryDirectories.push(directory);
-    process.env.PROJECT_CONTEXT_CONFIG_DIR = join(directory, "config");
-    process.env.PROJECT_CONTEXT_STATE_DIR = join(directory, "state");
+    await withTemporaryDirectory("project-context-mcp-", async (directory) => {
+      process.env.PROJECT_CONTEXT_CONFIG_DIR = join(directory, "config");
+      process.env.PROJECT_CONTEXT_STATE_DIR = join(directory, "state");
 
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    const server = createProjectIssuesServer();
-    const client = new Client({ name: "test-client", version: "1.0.0" });
-    await server.connect(serverTransport);
-    await client.connect(clientTransport);
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const server = createProjectIssuesServer();
+      const client = new Client({ name: "test-client", version: "1.0.0" });
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
 
-    const response = (await client.callTool({
-      name: "resolve_project_context",
-      arguments: { cwd: directory },
-    })) as { isError?: boolean; content: Array<{ type: string; text?: string }> };
-    const content = response.content[0];
-    if (content?.type !== "text" || !content.text) {
-      throw new Error("missing MCP text error");
-    }
-    const error = JSON.parse(content.text);
+      const response = (await client.callTool({
+        name: "resolve_project_context",
+        arguments: { cwd: directory },
+      })) as {
+        isError?: boolean;
+        content: Array<{ type: string; text?: string }>;
+        structuredContent?: { error?: { code?: string } };
+      };
+      const content = response.content[0];
+      if (content?.type !== "text" || !content.text) {
+        throw new Error("missing MCP text error");
+      }
+      const error = JSON.parse(content.text);
 
-    expect(response.isError).toBe(true);
-    expect(error).toMatchObject({ error: "CONFIG_NOT_FOUND" });
-    expect(error.message).toContain("@sandovalrr/project-context-mcp@");
-    expect(error.message).toContain("project-context setup");
-    await expect(stat(process.env.PROJECT_CONTEXT_CONFIG_DIR)).rejects.toThrow();
+      expect(response.isError).toBe(true);
+      expect(response.structuredContent?.error?.code).toBe("CONFIG_NOT_FOUND");
+      expect(error).toMatchObject({ error: "CONFIG_NOT_FOUND" });
+      expect(error.message).toContain("@sandovalrr/project-context-mcp@");
+      expect(error.message).toContain("project-context setup");
+      await expect(stat(process.env.PROJECT_CONTEXT_CONFIG_DIR)).rejects.toThrow();
 
-    await client.close();
-    await server.close();
+      await client.close();
+      await server.close();
+    });
   });
 
   test("rejects an explicit working directory outside client filesystem roots", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "project-context-roots-"));
-    temporaryDirectories.push(directory);
-    const allowed = join(directory, "allowed");
-    const outside = join(directory, "outside");
-    await Promise.all([mkdir(allowed), mkdir(outside)]);
+    await withTemporaryDirectory("project-context-roots-", async (directory) => {
+      const allowed = join(directory, "allowed");
+      const outside = join(directory, "outside");
+      await Promise.all([mkdir(allowed), mkdir(outside)]);
 
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    const server = createProjectIssuesServer();
-    const client = new Client(
-      { name: "test-client", version: "1.0.0" },
-      { capabilities: { roots: {} } },
-    );
-    client.setRequestHandler(ListRootsRequestSchema, () => ({
-      roots: [{ uri: pathToFileURL(allowed).href }],
-    }));
-    await server.connect(serverTransport);
-    await client.connect(clientTransport);
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const server = createProjectIssuesServer();
+      const client = new Client(
+        { name: "test-client", version: "1.0.0" },
+        { capabilities: { roots: {} } },
+      );
+      client.setRequestHandler(ListRootsRequestSchema, () => ({
+        roots: [{ uri: pathToFileURL(allowed).href }],
+      }));
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
 
-    const response = (await client.callTool({
-      name: "resolve_project_context",
-      arguments: { cwd: outside },
-    })) as { isError?: boolean; content: Array<{ type: string; text?: string }> };
-    const content = response.content[0];
-    if (content?.type !== "text" || !content.text) {
-      throw new Error("missing MCP text error");
-    }
+      const response = (await client.callTool({
+        name: "resolve_project_context",
+        arguments: { cwd: outside },
+      })) as { isError?: boolean; content: Array<{ type: string; text?: string }> };
+      const content = response.content[0];
+      if (content?.type !== "text" || !content.text) {
+        throw new Error("missing MCP text error");
+      }
 
-    expect(response.isError).toBe(true);
-    expect(JSON.parse(content.text)).toMatchObject({
-      error: "WORKING_DIRECTORY_OUTSIDE_ROOTS",
+      expect(response.isError).toBe(true);
+      expect(JSON.parse(content.text)).toMatchObject({
+        error: "WORKING_DIRECTORY_OUTSIDE_ROOTS",
+      });
+
+      await client.close();
+      await server.close();
     });
-
-    await client.close();
-    await server.close();
   });
 });

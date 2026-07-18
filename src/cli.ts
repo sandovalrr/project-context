@@ -12,6 +12,7 @@ import {
 import { resolveProjectContext } from "./core/context.ts";
 import { addFileCredential, resolveCredentialAlias } from "./core/credentials.ts";
 import { errorMessage, ProjectContextError } from "./core/errors.ts";
+import { migrateHostConfiguration } from "./core/migrations.ts";
 import {
   applyIssueOperation,
   getIssue,
@@ -237,15 +238,7 @@ const cli = yargs(hideBin(process.argv))
             description: "Apply the previewed migration with backups and atomic replacement",
           }),
         async (argv) => {
-          const result = await validateConfiguration();
-          print(
-            {
-              migrated: false,
-              applied: argv.apply,
-              reason: `Configuration is already schema version ${result.schema_version}`,
-            },
-            argv,
-          );
+          print(await migrateHostConfiguration({ apply: argv.apply }), argv);
         },
       )
       .demandCommand(1, "Choose validate or migrate")

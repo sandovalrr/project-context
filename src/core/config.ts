@@ -65,6 +65,13 @@ async function assertSecureHostConfig(path: string): Promise<void> {
 export async function loadProjectsConfig(path: string): Promise<ProjectsConfig> {
   await assertSecureHostConfig(path);
   const value = await parseYamlFile(path);
+  return validateProjectsConfigValue(value, path);
+}
+
+export function validateProjectsConfigValue(
+  value: unknown,
+  path = "projects.yaml",
+): ProjectsConfig {
   if (!validateProjectsSchema(value)) {
     throw new ProjectContextError(
       "PROJECTS_SCHEMA_INVALID",
@@ -78,6 +85,13 @@ export async function loadProjectsConfig(path: string): Promise<ProjectsConfig> 
 export async function loadCredentialConfig(path: string): Promise<CredentialsConfig> {
   await assertSecureHostConfig(path);
   const value = await parseYamlFile(path);
+  return validateCredentialConfigValue(value, path);
+}
+
+export function validateCredentialConfigValue(
+  value: unknown,
+  path = "credentials.yaml",
+): CredentialsConfig {
   if (!validateCredentialsSchema(value)) {
     throw new ProjectContextError(
       "CREDENTIALS_SCHEMA_INVALID",

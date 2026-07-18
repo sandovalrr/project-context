@@ -63,7 +63,10 @@ const prepareResultSchema = z.object({
 });
 
 function resultSchema<T extends z.ZodType>(schema: T) {
-  return { result: schema };
+  return {
+    result: schema.optional(),
+    error: z.object({ code: z.string(), message: z.string() }).optional(),
+  };
 }
 
 function result(value: unknown) {
@@ -79,18 +82,20 @@ function errorResult(error: unknown) {
   const message = isMissingConfiguration
     ? `${error.message}. Run: ${setupCommand()}`
     : errorMessage(error);
+  const structuredError = {
+    code: error instanceof ProjectContextError ? error.code : "UNEXPECTED",
+    message,
+  };
 
   return {
     isError: true,
     content: [
       {
         type: "text" as const,
-        text: JSON.stringify({
-          error: error instanceof ProjectContextError ? error.code : "UNEXPECTED",
-          message,
-        }),
+        text: JSON.stringify({ error: structuredError.code, message }),
       },
     ],
+    structuredContent: { error: structuredError },
   };
 }
 

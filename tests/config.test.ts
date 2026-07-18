@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -7,8 +7,10 @@ import {
   loadProjectsConfig,
   validateRegistryReferences,
 } from "../src/core/config.ts";
+import { migrateHostConfiguration } from "../src/core/migrations.ts";
 import { getPaths } from "../src/core/paths.ts";
 import { guidedSetupPlan, setupHostConfiguration } from "../src/core/setup.ts";
+import { withTemporaryDirectory } from "./helpers/temporary.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -122,5 +124,62 @@ describe("guidedSetupPlan", () => {
       fields: { token: { source: "environment", variable: "GITHUB_EXAMPLE_TOKEN" } },
     });
     expect(JSON.stringify(plan)).not.toContain("secret");
+  });
+});
+
+describe("configuration migrations", () => {
+  test("previews and explicitly applies an unversioned v0 registry with backups", async () => {
+    await withTemporaryDirectory("project-context-migration-", async (directory) => {
+      process.env.PROJECT_CONTEXT_CONFIG_DIR = join(directory, "config");
+      process.env.PROJECT_CONTEXT_STATE_DIR = join(directory, "state");
+      await mkdir(process.env.PROJECT_CONTEXT_CONFIG_DIR, { recursive: true, mode: 0o700 });
+      await Promise.all([
+        writeFile(
+          join(process.env.PROJECT_CONTEXT_CONFIG_DIR, "projects.yaml"),
+          "providers: {}\nprojects: {}\n",
+          { mode: 0o600 },
+        ),
+        writeFile(
+          join(process.env.PROJECT_CONTEXT_CONFIG_DIR, "credentials.yaml"),
+          "credentials: {}\n",
+          { mode: 0o600 },
+        ),
+      ]);
+
+      const preview = await migrateHostConfiguration();
+      expect(preview).toMatchObject({ needed: true, applied: false });
+      expect(preview.files).toHaveLength(2);
+      expect(await readFile(getPaths().projectsFile, "utf8")).not.toContain("version:");
+
+      const applied = await migrateHostConfiguration({ apply: true });
+      expect(applied).toMatchObject({ needed: true, applied: true });
+      expect(applied.backups).toHaveLength(2);
+      expect((await loadProjectsConfig(getPaths().projectsFile)).version).toBe(1);
+      expect((await loadCredentialConfig(getPaths().credentialsFile)).version).toBe(1);
+      const backupMetadata = await Promise.all((applied.backups ?? []).map((path) => stat(path)));
+      expect(backupMetadata.every((metadata) => metadata.isFile())).toBe(true);
+    });
+  });
+
+  test("rejects configuration created by a newer schema", async () => {
+    await withTemporaryDirectory("project-context-migration-", async (directory) => {
+      process.env.PROJECT_CONTEXT_CONFIG_DIR = join(directory, "config");
+      process.env.PROJECT_CONTEXT_STATE_DIR = join(directory, "state");
+      await mkdir(process.env.PROJECT_CONTEXT_CONFIG_DIR, { recursive: true, mode: 0o700 });
+      await Promise.all([
+        writeFile(
+          join(process.env.PROJECT_CONTEXT_CONFIG_DIR, "projects.yaml"),
+          "version: 2\nproviders: {}\nprojects: {}\n",
+          { mode: 0o600 },
+        ),
+        writeFile(
+          join(process.env.PROJECT_CONTEXT_CONFIG_DIR, "credentials.yaml"),
+          "version: 1\ncredentials: {}\n",
+          { mode: 0o600 },
+        ),
+      ]);
+
+      await expect(migrateHostConfiguration()).rejects.toThrow("future schema version 2");
+    });
   });
 });

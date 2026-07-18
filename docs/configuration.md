@@ -21,6 +21,12 @@ rejected. `project-context config migrate` previews an available migration;
 `--apply` is required for atomic replacement and timestamped backup. Startup
 never migrates configuration.
 
+The initial migration path treats an otherwise valid unversioned registry (or
+one declaring `version: 0`) as version 0 and adds `version: 1`. Preview reports
+both affected files without writing. Apply reacquires the configuration lock,
+re-reads and validates both registries, backs them up, and replaces each file
+through a mode-`0600` temporary file.
+
 ## Project registry
 
 `projects.yaml` contains routing and expected identity, never credentials.
