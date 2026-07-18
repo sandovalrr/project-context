@@ -1,3 +1,5 @@
+import { publicationUrl } from "./publication-url.mjs";
+
 const version = process.argv[2];
 const target = process.argv[3];
 
@@ -5,10 +7,7 @@ if (!version || !["npm", "registry"].includes(target)) {
   throw new Error("Usage: node scripts/verify-publication.mjs <version> <npm|registry>");
 }
 
-const url =
-  target === "npm"
-    ? `https://registry.npmjs.org/@sandovalrr%2fproject-context-mcp/${version}`
-    : `https://registry.modelcontextprotocol.io/v0.1/servers/io.github.sandovalrr/project-context/versions/${version}`;
+const url = publicationUrl(version, target);
 
 async function waitForPublication(attempts) {
   const response = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(20_000) });
