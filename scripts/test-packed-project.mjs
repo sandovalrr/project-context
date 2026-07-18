@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { promisify } from "node:util";
 
 const executeFile = promisify(execFile);
@@ -19,7 +19,7 @@ try {
 
   await executeFile(
     process.execPath,
-    ["scripts/test-package.mjs", join(directory, result.filename)],
+    ["scripts/test-package.mjs", relative(process.cwd(), join(directory, result.filename))],
     {
       stdio: "inherit",
     },
