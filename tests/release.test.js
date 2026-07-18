@@ -38,6 +38,27 @@ describe("release policy", () => {
     expect(releaseStep.env.GITHUB_TOKEN).toBe(releaseTokenExpression);
   });
 
+  test("installs locked verification dependencies before npm publication", async () => {
+    const workflow = parse(
+      await readFile(join(process.cwd(), ".github/workflows/publish-release.yml"), "utf8"),
+    );
+    const steps = workflow.jobs["publish-npm"].steps;
+    const setupBunIndex = steps.findIndex(({ name }) => name === "Set up Bun");
+    const installIndex = steps.findIndex(({ name }) => name === "Install locked dependencies");
+    const verifyIndex = steps.findIndex(
+      ({ name }) => name === "Verify tag, versions, checksums, SBOM, and package behavior",
+    );
+    const publishIndex = steps.findIndex(
+      ({ name }) => name === "Publish the exact tarball to npm with OIDC provenance",
+    );
+
+    expect(steps[setupBunIndex]?.uses).toMatch(/^oven-sh\/setup-bun@[0-9a-f]{40}$/);
+    expect(steps[installIndex]?.run).toBe("bun ci");
+    expect(setupBunIndex).toBeLessThan(installIndex);
+    expect(installIndex).toBeLessThan(verifyIndex);
+    expect(verifyIndex).toBeLessThan(publishIndex);
+  });
+
   test("keeps breaking changes pre-1.0 until the explicit 1.0 confirmation", () => {
     expect(normalizeReleaseType("0.4.2", "major", false)).toBe("minor");
     expect(normalizeReleaseType("0.4.2", "major", true)).toBe("major");
