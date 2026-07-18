@@ -4,7 +4,7 @@ export default {
   tagFormat: "v${version}",
   plugins: [
     ["./scripts/release-analyzer.mjs", { preset: "conventionalcommits" }],
-    ["@semantic-release/release-notes-generator", { preset: "conventionalcommits" }],
+    ["@semantic-release/release-notes-generator", {}],
     ["@semantic-release/changelog", { changelogFile: "CHANGELOG.md" }],
     "./scripts/release-prepare.mjs",
     [
