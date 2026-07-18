@@ -141,7 +141,57 @@ async function normalizeRequest(
       );
     }
   }
+  validateFields(input, provider, "create");
   return { operation: "create", input, ...(request.preset ? { preset: request.preset } : {}) };
+}
+
+function validateFields(
+  input: Record<string, unknown>,
+  provider: ProjectProvider,
+  operation: "create" | "update",
+): void {
+  const allowed = new Set(["title", "description", "labels", "assignee", "priority"]);
+  if (operation === "create" && provider.type === "jira-cloud") allowed.add("issueType");
+  if (provider.type === "github") allowed.delete("priority");
+  for (const field of Object.keys(input)) {
+    if (!allowed.has(field)) {
+      throw new ProjectContextError(
+        "FIELD_UNSUPPORTED",
+        `Field ${field} is not supported for ${provider.type} ${operation}`,
+      );
+    }
+  }
+  for (const field of ["title", "description"] as const) {
+    if (input[field] !== undefined && typeof input[field] !== "string") {
+      throw new ProjectContextError("FIELD_INVALID", `Field ${field} must be a string`);
+    }
+  }
+  if (
+    input.labels !== undefined &&
+    (!Array.isArray(input.labels) || input.labels.some((label) => typeof label !== "string"))
+  ) {
+    throw new ProjectContextError("FIELD_INVALID", "Field labels must be an array of strings");
+  }
+  if (
+    input.assignee !== undefined &&
+    typeof input.assignee !== "string" &&
+    !(operation === "update" && input.assignee === null)
+  ) {
+    throw new ProjectContextError(
+      "FIELD_INVALID",
+      "Field assignee must be a string, or null when updating",
+    );
+  }
+  if (
+    input.priority !== undefined &&
+    typeof input.priority !== "string" &&
+    typeof input.priority !== "number"
+  ) {
+    throw new ProjectContextError("FIELD_INVALID", "Field priority must be a string or number");
+  }
+  if (input.issueType !== undefined && typeof input.issueType !== "string") {
+    throw new ProjectContextError("FIELD_INVALID", "Field issueType must be a string");
+  }
 }
 
 function previewChanges(request: IssueOperationRequest): Record<string, unknown> {
@@ -166,12 +216,41 @@ export async function prepareIssueOperation(
   request: IssueOperationRequest,
   options: { cwd?: string; provider?: string; fetcher?: typeof fetch } = {},
 ): Promise<PrepareResult> {
+  if (request.operation !== "create" && !request.identifier.trim()) {
+    throw new ProjectContextError("ISSUE_IDENTIFIER_REQUIRED", "Issue identifier is required");
+  }
+  if (request.operation === "comment" && !request.body.trim()) {
+    throw new ProjectContextError("ISSUE_COMMENT_REQUIRED", "Issue comment cannot be empty");
+  }
+  if (
+    request.operation === "transition" &&
+    !["open", "in_progress", "done", "canceled"].includes(request.status)
+  ) {
+    throw new ProjectContextError("STATUS_INVALID", `Unknown canonical status ${request.status}`);
+  }
+  if (request.operation === "link") {
+    try {
+      const target = new URL(request.targetUrl);
+      if (target.protocol !== "https:") throw new Error("not HTTPS");
+    } catch {
+      throw new ProjectContextError(
+        "ISSUE_URL_INVALID",
+        "Issue link target must be an absolute HTTPS URL",
+      );
+    }
+  }
   const reference = requestReference(request);
   const current = await runtime(options.cwd ?? process.cwd(), {
     ...(options.provider ? { explicitProvider: options.provider } : {}),
     ...(reference ? { reference } : {}),
     ...(options.fetcher ? { fetcher: options.fetcher } : {}),
   });
+  if (request.operation === "update") {
+    if (Object.keys(request.input).length === 0) {
+      throw new ProjectContextError("ISSUE_UPDATE_EMPTY", "Issue update has no changed fields");
+    }
+    validateFields(request.input, current.provider, "update");
+  }
   const routedRequest = withRoutedReference(
     await normalizeRequest(request, current.provider),
     current.routedReference,

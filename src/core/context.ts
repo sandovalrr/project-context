@@ -18,7 +18,7 @@ export async function resolveProjectContext(cwd = process.cwd()) {
     repository: {
       id: repository.repositoryId,
       git_root: repository.gitRoot,
-      origin: repository.normalizedOrigin,
+      origin: repository.normalizedOrigin ?? null,
       match_source: repository.matchSource,
     },
     issues: {

@@ -6,8 +6,8 @@
 - Expected identity: workspace ID and display name.
 - Required target: team.
 - Optional target: explicit project object or `none`.
-- Native workflow categories may resolve canonical states only when unique.
-- Issue relationships use native relations when supported.
+- Canonical states require explicit project mappings.
+- Issue URLs are added through comments when a native relation is unavailable.
 
 ## GitHub Issues
 
@@ -24,8 +24,7 @@
 - Authentication: account email plus API token.
 - Expected identity: site and account ID.
 - Required target: Jira project.
-- Canonical state resolution uses Jira status categories only when the available
-  transition is unique.
+- Canonical state mappings resolve to one uniquely named available transition.
 - Jira Server and Data Center are unsupported in schema version 1.
 
 ## Shared operations
@@ -34,4 +33,3 @@ Adapters expose provider-neutral read/search, create, update, comment,
 transition, close/reopen, and related-link operations where the provider
 supports them. Permanent deletion is never exposed. Unsupported native features
 produce a capability error rather than an approximation.
-

@@ -76,10 +76,6 @@ export function routeIssueProvider(
   profiles: ProjectsConfig["providers"],
   options: { explicitProvider?: string; reference?: string } = {},
 ): ProviderRoute {
-  if (options.explicitProvider) {
-    return select(project, options.explicitProvider, "explicit", options.reference);
-  }
-
   const reference = options.reference?.trim();
   if (reference) {
     try {
@@ -89,7 +85,15 @@ export function routeIssueProvider(
           .filter(([, provider]) => urlMatches(url, provider, profiles))
           .map(([alias, provider]) => ({ alias, provider }));
         const route = uniqueRoute(matches, "url", reference);
-        if (route) return { ...route, reference: referenceFromUrl(url, route.provider) };
+        if (route) {
+          if (options.explicitProvider && options.explicitProvider !== route.alias) {
+            throw new ProjectContextError(
+              "PROVIDER_ROUTE_CONFLICT",
+              `Issue URL routes to ${route.alias}, not explicit provider ${options.explicitProvider}`,
+            );
+          }
+          return { ...route, reference: referenceFromUrl(url, route.provider) };
+        }
         throw new ProjectContextError(
           "URL_PROVIDER_NOT_CONFIGURED",
           `URL ${reference} does not match a configured issue provider`,
@@ -112,13 +116,27 @@ export function routeIssueProvider(
         "qualified",
         qualified[2],
       );
-      if (route) return route;
+      if (route) {
+        if (options.explicitProvider && options.explicitProvider !== route.alias) {
+          throw new ProjectContextError(
+            "PROVIDER_ROUTE_CONFLICT",
+            `Qualified reference routes to ${route.alias}, not explicit provider ${options.explicitProvider}`,
+          );
+        }
+        return route;
+      }
       throw new ProjectContextError(
         "QUALIFIED_PROVIDER_NOT_CONFIGURED",
         `Qualified provider ${prefix} is not uniquely configured for this repository`,
       );
     }
+  }
 
+  if (options.explicitProvider) {
+    return select(project, options.explicitProvider, "explicit", reference);
+  }
+
+  if (reference) {
     const patternMatches = Object.entries(project.issues.providers)
       .filter(([, provider]) =>
         (provider.identifiers ?? []).some((pattern) => new RegExp(pattern).test(reference)),

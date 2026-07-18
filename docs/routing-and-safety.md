@@ -23,11 +23,10 @@ Normal coding work may continue with issue integration marked unresolved.
 Read-only issue work may use an explicit URL or fully specified conversational
 context after disclosing that it is outside configured context.
 
-Before a session-only write, show the temporary repository, provider,
-workspace/project target, and scope, then require explicit confirmation. This
-fallback is available only when the whole repository is unconfigured. It cannot
-bypass an existing repository boundary. Point to the shipped configuration
-example, but never modify global configuration without approval.
+Writes fail closed until the repository, provider profile, target, and expected
+identity are configured. Point to the shipped configuration example, but never
+modify global configuration without approval. Temporary conversational context
+cannot bypass a configured repository boundary or authorize a write.
 
 ## Provider failures
 
@@ -48,10 +47,9 @@ canceled
 ```
 
 Project configuration maps those intents to provider-native states or labels.
-Without a mapping, provider metadata may resolve an intent only when exactly one
-native state belongs to the compatible semantic category. Otherwise stop and
-show the available choices. GitHub has no native `in_progress` state, so it
-requires an explicit label mapping.
+Version one requires an explicit mapping and fails closed when it is absent.
+GitHub has no native `in_progress` state, so it requires an explicit label
+mapping.
 
 Creating an issue without a requested state uses the provider's normal default.
 
@@ -61,22 +59,21 @@ Provider entries may declare required fields, defaults, and named presets.
 Presets that change labels, priority, workflow, or templates are explicit.
 An agent may suggest a preset but cannot silently select one.
 
-Markdown templates are host-local and reusable. The resolver validates required
-template sections and variables before preparing the create operation.
+Markdown templates are host-local and reusable. Required creation fields are
+validated before a preview is created.
 
 ## Cross-provider links
 
-Use native relationships within one provider when supported. Across providers,
-use canonical issue URLs. Writing a backlink or comment to the second issue is
-a separate mutation included in the same preview. Never merge or equate issues
-because their titles are similar.
+Use a native relationship within one provider when the adapter supports it.
+Otherwise, link with a canonical issue URL in a provider comment. Writing a
+backlink to a second issue is a separate mutation with its own preview. Never
+merge or equate issues because their titles are similar.
 
 ## Audit policy
 
 Every attempted issue mutation appends minimal metadata to a user-only JSONL
-audit log: timestamp, canonical repository, provider profile, target IDs, issue
-identifier, operation, result, and whether routing came from configuration or
-temporary context.
+audit log: timestamp, canonical repository, provider alias and type, identity
+ID, issue identifier and ID, operation, and result.
 
 Never store credentials, descriptions, comments, attachments, or other issue
 content in the audit log.

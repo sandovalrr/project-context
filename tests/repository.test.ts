@@ -84,4 +84,33 @@ describe("resolveRepository", () => {
     const config = { version: 1, providers: {}, projects: {} } as ProjectsConfig;
     await expect(resolveRepository(config, directory)).rejects.toThrow("is not configured");
   });
+
+  test("resolves a repository without origin through an explicit path alias", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "project-context-repo-"));
+    temporaryDirectories.push(directory);
+    Bun.spawnSync(["git", "init", "-q", directory]);
+    const config = {
+      version: 1,
+      providers: {},
+      projects: {
+        "github.com/example/local-only": {
+          aliases: { paths: [directory] },
+          issues: {
+            default: "github",
+            providers: {
+              github: {
+                type: "github",
+                profile: "github-example",
+                target: { repository: "inherit" },
+              },
+            },
+          },
+        },
+      },
+    } as unknown as ProjectsConfig;
+
+    const resolved = await resolveRepository(config, directory);
+    expect(resolved.matchSource).toBe("path-alias");
+    expect(resolved.normalizedOrigin).toBeUndefined();
+  });
 });

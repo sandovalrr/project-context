@@ -132,8 +132,8 @@ export interface CredentialsConfig {
 export interface ResolvedRepository {
   repositoryId: string;
   gitRoot: string;
-  originRemote: string;
-  normalizedOrigin: string;
+  originRemote?: string;
+  normalizedOrigin?: string;
   matchSource: "origin" | "remote-alias" | "path-alias";
   project: ProjectConfig;
 }

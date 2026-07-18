@@ -67,8 +67,11 @@ Runtime state defaults to:
 ~/.local/state/project-context/
 ```
 
-It contains locks, short-lived prepared operations, timestamped backups, and a
-metadata-only audit log. It contains no provider credentials or issue bodies.
+It contains locks, short-lived HMAC-signed prepared operations, timestamped
+backups, and a metadata-only audit log. Prepared payloads may contain the issue
+content required for an approved change; they are mode-0600, expire after ten
+minutes, and are deleted after successful application. Provider credentials
+are never stored in runtime state.
 
 ## Provider model
 

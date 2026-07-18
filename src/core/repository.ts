@@ -53,26 +53,36 @@ export async function resolveRepository(
   cwd = process.cwd(),
 ): Promise<ResolvedRepository> {
   const gitRoot = await realpath(runGit(cwd, ["rev-parse", "--show-toplevel"]));
-  const originRemote = runGit(gitRoot, ["remote", "get-url", "origin"]);
-  const normalizedOrigin = normalizeRemoteUrl(originRemote);
+  let originRemote: string | undefined;
+  let normalizedOrigin: string | undefined;
+  try {
+    originRemote = runGit(gitRoot, ["remote", "get-url", "origin"]);
+    normalizedOrigin = normalizeRemoteUrl(originRemote);
+  } catch (error) {
+    if (!(error instanceof ProjectContextError) || error.code !== "GIT_COMMAND_FAILED") throw error;
+  }
   const matches: Array<{
     repositoryId: string;
     matchSource: ResolvedRepository["matchSource"];
   }> = [];
 
   for (const [repositoryId, project] of Object.entries(config.projects)) {
-    if (sameRepository(repositoryId, normalizedOrigin)) {
+    if (normalizedOrigin && sameRepository(repositoryId, normalizedOrigin)) {
       matches.push({ repositoryId, matchSource: "origin" });
       continue;
     }
 
-    const remoteMatches = (project.aliases?.remotes ?? []).some((remote) => {
-      try {
-        return sameRepository(normalizeRemoteUrl(remote), normalizedOrigin);
-      } catch {
-        return remote === originRemote;
-      }
-    });
+    const remoteMatches =
+      Boolean(originRemote) &&
+      (project.aliases?.remotes ?? []).some((remote) => {
+        try {
+          return normalizedOrigin
+            ? sameRepository(normalizeRemoteUrl(remote), normalizedOrigin)
+            : false;
+        } catch {
+          return remote === originRemote;
+        }
+      });
     if (remoteMatches) {
       matches.push({ repositoryId, matchSource: "remote-alias" });
       continue;
@@ -93,14 +103,14 @@ export async function resolveRepository(
   if (matches.length === 0) {
     throw new ProjectContextError(
       "REPOSITORY_NOT_CONFIGURED",
-      `Repository ${normalizedOrigin} is not configured`,
+      `Repository ${normalizedOrigin ?? gitRoot} is not configured`,
       { gitRoot, originRemote, normalizedOrigin },
     );
   }
   if (matches.length > 1) {
     throw new ProjectContextError(
       "REPOSITORY_AMBIGUOUS",
-      `Repository ${normalizedOrigin} matches multiple configured projects: ${matches
+      `Repository ${normalizedOrigin ?? gitRoot} matches multiple configured projects: ${matches
         .map((match) => match.repositoryId)
         .join(", ")}`,
     );
@@ -115,8 +125,8 @@ export async function resolveRepository(
   return {
     repositoryId: match.repositoryId,
     gitRoot,
-    originRemote,
-    normalizedOrigin,
+    ...(originRemote ? { originRemote } : {}),
+    ...(normalizedOrigin ? { normalizedOrigin } : {}),
     matchSource: match.matchSource,
     project,
   };

@@ -127,4 +127,16 @@ describe("issue write workflow", () => {
     expect(audit).toContain('"outcome":"success"');
     expect(audit).not.toContain("sensitive-comment-body");
   });
+
+  test("rejects fields the selected provider would silently ignore", async () => {
+    const { repository } = await fixture();
+    const { fetcher } = mockFetch([{ id: 1, login: "example-user" }]);
+
+    await expect(
+      prepareIssueOperation(
+        { operation: "create", input: { title: "Example", priority: "high" } },
+        { cwd: repository, fetcher },
+      ),
+    ).rejects.toThrow("not supported for github");
+  });
 });

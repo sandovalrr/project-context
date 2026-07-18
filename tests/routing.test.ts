@@ -49,6 +49,16 @@ describe("deterministic provider routing", () => {
     ).toThrow("does not match");
   });
 
+  test("an issue URL cannot be overridden to a different provider", async () => {
+    const { config, project } = await fixture();
+    expect(() =>
+      routeIssueProvider(project, config.providers, {
+        explicitProvider: "linear",
+        reference: "https://github.com/example/example-repository/issues/12",
+      }),
+    ).toThrow("routes to github");
+  });
+
   test("falls back only to the configured default", async () => {
     const { config, project } = await fixture();
     expect(

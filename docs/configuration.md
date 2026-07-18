@@ -18,9 +18,9 @@ older versions require an explicit, previewed `project-context config migrate`.
 ## Project registry
 
 `projects.yaml` contains no credentials. Provider IDs are authoritative and
-names are display metadata. `project-context doctor` detects renamed or
-inaccessible resources and offers a previewed name refresh; it never substitutes
-another resource with the same name.
+names are display metadata. `project-context doctor` validates schema,
+references, permissions, credentials, and repository routing. It never
+substitutes another resource with the same name.
 
 ```yaml
 version: 1
