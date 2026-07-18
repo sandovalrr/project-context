@@ -18,6 +18,7 @@ import { getPaths } from "./core/paths.ts";
 import type { IssueOperationRequest } from "./core/pending.ts";
 import { promptHidden } from "./core/prompt.ts";
 import { setupHostConfiguration } from "./core/setup.ts";
+import { startProjectIssuesStdioServer } from "./mcp.ts";
 
 const HELP = `project-context
 
@@ -39,6 +40,7 @@ Usage:
   project-context issue prepare close|reopen --ref <reference>
   project-context issue prepare link --ref <reference> --url <issue-url>
   project-context issue apply <preview-token>
+  project-context mcp
   project-context --help
 `;
 
@@ -260,6 +262,10 @@ async function main(): Promise<void> {
     if (!token)
       throw new ProjectContextError("ARGUMENT_REQUIRED", "issue apply requires a preview token");
     print(await applyIssueOperation(token, { cwd: option(args, "--cwd") ?? process.cwd() }));
+    return;
+  }
+  if (command === "mcp") {
+    await startProjectIssuesStdioServer();
     return;
   }
 
