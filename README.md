@@ -65,6 +65,7 @@ project-context resolve --cwd /path/to/repository
 project-context doctor
 project-context audit list
 project-context skill status
+project-context integration manifest --client codex
 ```
 
 The stdio server exposes five tools:
@@ -78,6 +79,12 @@ The stdio server exposes five tools:
 Every tool has an input and output schema. Starting the server has no setup side
 effects; when host configuration is absent, tools return an actionable
 structured error.
+
+`integration manifest` prints the provider-neutral command definition by
+default. Pass `--client codex`, `claude`, `zed`, or `vscode` to emit native,
+ready-to-paste configuration pinned to the installed package version. Add
+`--json` when automation needs an envelope containing the client, format, and
+configuration.
 
 The optional `project-issues` agent skill is packaged but never installed as an
 npm lifecycle side effect:
