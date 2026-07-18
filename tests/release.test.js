@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { parse } from "yaml";
 import { packageVersionsFromLockDiff } from "../scripts/check-package-age.mjs";
 import { normalizeReleaseType } from "../scripts/release-analyzer.mjs";
-import { synchronizeReleaseVersion } from "../scripts/release-prepare.mjs";
+import { cycloneDxInvocation, synchronizeReleaseVersion } from "../scripts/release-prepare.mjs";
 import { withTemporaryDirectory } from "./helpers/temporary.ts";
 
 describe("release policy", () => {
@@ -69,6 +69,26 @@ describe("release policy", () => {
       const server = JSON.parse(await readFile(join(directory, "server.json"), "utf8"));
       expect(server.version).toBe("0.1.0");
       expect(server.packages[0].version).toBe("0.1.0");
+    });
+  });
+
+  test("runs CycloneDX through npm when dependencies were installed by Bun", () => {
+    expect(cycloneDxInvocation("/tmp/release.sbom.json")).toEqual({
+      command: "npm",
+      args: [
+        "exec",
+        "--",
+        "cyclonedx-npm",
+        "--ignore-npm-errors",
+        "--output-reproducible",
+        "--validate",
+        "--mc-type",
+        "application",
+        "--output-format",
+        "JSON",
+        "--output-file",
+        "/tmp/release.sbom.json",
+      ],
     });
   });
 });

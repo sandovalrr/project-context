@@ -38,6 +38,28 @@ async function sha256(path) {
     .digest("hex");
 }
 
+export function cycloneDxInvocation(outputPath) {
+  // npm supplies its own CLI path, avoiding Bun's npm_execpath shim. Bun's
+  // install layout can also trigger false npm-ls errors; SBOM validation stays enabled.
+  return {
+    command: "npm",
+    args: [
+      "exec",
+      "--",
+      "cyclonedx-npm",
+      "--ignore-npm-errors",
+      "--output-reproducible",
+      "--validate",
+      "--mc-type",
+      "application",
+      "--output-format",
+      "JSON",
+      "--output-file",
+      outputPath,
+    ],
+  };
+}
+
 async function createReleaseArtifacts(version, cwd, env) {
   const releaseDirectory = join(cwd, "release");
   await rm(releaseDirectory, { recursive: true, force: true });
@@ -56,22 +78,8 @@ async function createReleaseArtifacts(version, cwd, env) {
   const tarballPath = join(releaseDirectory, packageResult.filename);
   const sbomName = `project-context-mcp-${version}.sbom.cdx.json`;
   const sbomPath = join(releaseDirectory, sbomName);
-  await run(
-    join(cwd, "node_modules", ".bin", "cyclonedx-npm"),
-    [
-      "cyclonedx-npm",
-      "--output-reproducible",
-      "--validate",
-      "--mc-type",
-      "application",
-      "--output-format",
-      "JSON",
-      "--output-file",
-      sbomPath,
-    ],
-    cwd,
-    env,
-  );
+  const cycloneDx = cycloneDxInvocation(sbomPath);
+  await run(cycloneDx.command, cycloneDx.args, cwd, env);
   const checksumName = `project-context-mcp-${version}.sha256`;
   const checksumPath = join(releaseDirectory, checksumName);
   const checksums = [
