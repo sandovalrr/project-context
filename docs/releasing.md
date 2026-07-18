@@ -20,8 +20,10 @@ then publishes the exact draft tarball to npm and the official MCP Registry.
 6. Keep the built-in Actions token read-only. The prepare workflow creates a
    short-lived, repository-scoped App token with `contents: write`; the publish
    workflow receives `contents: read` and `id-token: write`.
-7. Require CODEOWNERS review for workflows, release scripts, schemas, lockfiles,
-   and package/registry metadata.
+7. Maintain CODEOWNERS coverage for workflows, release scripts, schemas,
+   lockfiles, and package/registry metadata. Enable required CODEOWNERS review
+   after a second trusted maintainer can approve changes from the repository
+   owner; requiring it earlier would deadlock owner-authored pull requests.
 
 No long-lived npm or MCP Registry publishing token belongs in GitHub secrets.
 The release App token is generated on demand and revoked when the preparation
