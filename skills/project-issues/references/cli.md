@@ -16,3 +16,7 @@ project-context issue apply <preview-token>
 ```
 
 The CLI prints JSON. Treat a successful `prepare` response as a preview, not permission to apply it. Show the preview and wait for explicit approval before `apply`.
+
+Use `project-context <command> --help` for generated nested help and
+`project-context completion` for shell completion. Pass `--json` when a plain,
+machine-readable response is required explicitly.

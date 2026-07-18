@@ -33,3 +33,15 @@ transport: stdio
 ```
 
 Add those values using the MCP configuration mechanism supported by the chosen local agent client. The shared skill is implicitly invocable and tells an agent to resolve repository context before issue work.
+
+## Shell completion
+
+The executable can generate completion definitions for the active shell:
+
+```sh
+project-context completion
+```
+
+Follow the instructions in the generated script for the chosen shell. Use
+`project-context <command> --help` to inspect nested commands and provider-safe
+options. Commands emit plain JSON when redirected or when `--json` is used.

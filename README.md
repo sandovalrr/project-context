@@ -26,3 +26,15 @@ The implementation targets Bun and TypeScript. See
 [`docs/configuration.md`](docs/configuration.md) for the YAML model.
 See [`docs/installation.md`](docs/installation.md) for the user-scoped install
 and client-neutral MCP manifest.
+
+The CLI provides nested command help, strict option validation, spelling
+suggestions, and shell completion:
+
+```sh
+project-context --help
+project-context issue --help
+project-context completion
+```
+
+Interactive terminals receive colorized JSON. Redirected output and `--json`
+remain plain machine-readable JSON; `--no-color` disables styling explicitly.
