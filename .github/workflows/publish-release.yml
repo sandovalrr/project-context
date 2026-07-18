@@ -58,7 +58,8 @@ jobs:
         id: assets
         run: |
           node scripts/verify-release.mjs release "$TAG" > release-verification.json
-          node scripts/test-package.mjs "release/$(node -e 'const fs=require("node:fs"); const value=JSON.parse(fs.readFileSync("release-verification.json")); process.stdout.write(value.tarball)')"
+          tarball="$(node -e 'const fs=require("node:fs"); const value=JSON.parse(fs.readFileSync("release-verification.json")); process.stdout.write(value.tarball)')"
+          node scripts/test-package.mjs "$(realpath "release/$tarball")"
           node -e 'const fs=require("node:fs"); const value=JSON.parse(fs.readFileSync("release-verification.json")); fs.appendFileSync(process.env.GITHUB_OUTPUT, `tarball=release/${value.tarball}\nversion=${value.version}\n`)'
         env:
           TAG: ${{ github.event.release.tag_name || inputs.tag }}
