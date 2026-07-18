@@ -5,6 +5,7 @@ import { generateNotes } from "@semantic-release/release-notes-generator";
 import { parse } from "yaml";
 import releaseConfig from "../release.config.mjs";
 import { packageVersionsFromLockDiff } from "../scripts/check-package-age.mjs";
+import { publicationUrl } from "../scripts/publication-url.mjs";
 import { normalizeReleaseType } from "../scripts/release-analyzer.mjs";
 import { cycloneDxInvocation, synchronizeReleaseVersion } from "../scripts/release-prepare.mjs";
 import { withTemporaryDirectory } from "./helpers/temporary.ts";
@@ -156,5 +157,11 @@ describe("release policy", () => {
     expect(notes).toContain("add client-ready MCP manifests");
     expect(notes).toContain("### Bug Fixes");
     expect(notes).toContain("generate SBOM from Bun installs");
+  });
+
+  test("URL-encodes the namespaced MCP server when verifying publication", () => {
+    expect(publicationUrl("0.1.0", "registry")).toBe(
+      "https://registry.modelcontextprotocol.io/v0.1/servers/io.github.sandovalrr%2Fproject-context/versions/0.1.0",
+    );
   });
 });
