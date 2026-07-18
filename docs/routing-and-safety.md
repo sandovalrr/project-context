@@ -71,9 +71,27 @@ merge or equate issues because their titles are similar.
 
 ## Audit policy
 
-Every attempted issue mutation appends minimal metadata to a user-only JSONL
-audit log: timestamp, canonical repository, provider alias and type, identity
-ID, issue identifier and ID, operation, and result.
+Every attempted issue mutation appends minimal metadata to a mode-`0600` JSONL
+audit log: timestamp, package version, canonical repository, provider alias and
+type, identity ID, issue identifier and ID, operation, and result. Read
+operations are not logged. The active file rotates at 10 MiB and retains five
+older files.
 
 Never store credentials, descriptions, comments, attachments, or other issue
 content in the audit log.
+
+```sh
+project-context audit list --limit 100
+project-context audit purge --yes
+```
+
+## Preview claim and uncertain results
+
+Prepared payloads are encrypted locally, expire after ten minutes, and are
+purged before new previews are created. Apply atomically claims a token before
+calling a provider. A second apply cannot claim the same token.
+
+If an error occurs after claim, the result is `indeterminate`: the provider may
+have accepted the request even though the client did not receive a success
+response. Inspect the issue before preparing another change. Never replay an
+indeterminate token.

@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { copyFile, lstat, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { stringify } from "yaml";
@@ -19,18 +20,25 @@ function runSecretCommand(command: string[]): string {
   if (!executable) {
     throw new ProjectContextError("CREDENTIAL_COMMAND_INVALID", "Credential command is empty");
   }
-  const result = Bun.spawnSync([executable, ...args], {
-    stdout: "pipe",
-    stderr: "pipe",
+  const result = spawnSync(executable, args, {
+    encoding: "utf8",
     env: process.env,
+    maxBuffer: 64 * 1024,
+    shell: false,
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: 10_000,
+    windowsHide: true,
   });
-  if (result.exitCode !== 0) {
+  if (result.error || result.status !== 0) {
+    const timedOut = (result.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT";
     throw new ProjectContextError(
-      "CREDENTIAL_COMMAND_FAILED",
-      `credential command failed: ${basename(executable)} exited with status ${result.exitCode}`,
+      timedOut ? "CREDENTIAL_COMMAND_TIMEOUT" : "CREDENTIAL_COMMAND_FAILED",
+      timedOut
+        ? `credential command timed out: ${basename(executable)} exceeded 10 seconds`
+        : `credential command failed: ${basename(executable)} exited with status ${result.status ?? "unknown"}`,
     );
   }
-  return requireValue(result.stdout.toString(), `Credential command ${basename(executable)}`);
+  return requireValue(result.stdout, `Credential command ${basename(executable)}`);
 }
 
 async function readSecretFile(path: string): Promise<string> {
@@ -79,8 +87,6 @@ export async function resolveCredentialField(source: CredentialFieldSource): Pro
       );
     case "keychain":
       return resolveKeychain(source.service, source.account);
-    case "literal":
-      return source.value;
   }
 }
 

@@ -8,7 +8,7 @@ import {
   validateRegistryReferences,
 } from "../src/core/config.ts";
 import { getPaths } from "../src/core/paths.ts";
-import { setupHostConfiguration } from "../src/core/setup.ts";
+import { guidedSetupPlan, setupHostConfiguration } from "../src/core/setup.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -101,5 +101,26 @@ describe("setupHostConfiguration", () => {
     await chmod(getPaths().credentialsFile, 0o644);
 
     await expect(loadCredentialConfig(getPaths().credentialsFile)).rejects.toThrow("mode-0600");
+  });
+});
+
+describe("guidedSetupPlan", () => {
+  test("produces non-secret provider and credential snippets", () => {
+    const plan = guidedSetupPlan({
+      provider: "github",
+      alias: "github-example",
+      credentialVariable: "GITHUB_EXAMPLE_TOKEN",
+      identity: { login: "example-user", host: "github.com" },
+    });
+
+    expect(plan.provider_profile).toEqual({
+      type: "github",
+      credential: "github-example",
+      expected_identity: { login: "example-user", host: "github.com" },
+    });
+    expect(plan.credential).toEqual({
+      fields: { token: { source: "environment", variable: "GITHUB_EXAMPLE_TOKEN" } },
+    });
+    expect(JSON.stringify(plan)).not.toContain("secret");
   });
 });

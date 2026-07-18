@@ -1,34 +1,83 @@
 {
-  "name": "project-context",
-  "version": "0.1.0",
-  "private": true,
+  "name": "@sandovalrr/project-context-mcp",
+  "version": "0.0.0",
+  "private": false,
+  "description": "Provider-neutral MCP server for safe repository-scoped issue handling",
+  "mcpName": "io.github.sandovalrr/project-context",
   "license": "MIT",
+  "author": "Richard Sandoval",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "packageManager": "bun@1.3.14",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sandovalrr/project-context.git"
+  },
+  "homepage": "https://github.com/sandovalrr/project-context#readme",
+  "bugs": {
+    "url": "https://github.com/sandovalrr/project-context/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "issues",
+    "linear",
+    "github-issues",
+    "jira"
+  ],
+  "files": [
+    "dist/project-context.js",
+    "dist/project-context.js.map",
+    "dist/project-context-mcp.js",
+    "dist/project-context-mcp.js.map",
+    "skills/project-issues/",
+    "README.md",
+    "LICENSE",
+    "server.json"
+  ],
   "bin": {
-    "project-context": "./src/cli.ts"
+    "project-context": "./dist/project-context.js",
+    "project-context-mcp": "./dist/project-context-mcp.js"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
-    "build": "bun build ./src/cli.ts --compile --outfile ./dist/project-context",
+    "build": "bun run build:cli && bun run build:mcp",
+    "build:cli": "bun build ./src/cli.ts --target=node --format=esm --sourcemap=linked --outdir ./dist --entry-naming project-context.js",
+    "build:mcp": "bun build ./src/mcp-entry.ts --target=node --format=esm --sourcemap=linked --outdir ./dist --entry-naming project-context-mcp.js",
     "check": "bun run typecheck && bun run lint && bun test",
+    "check:package-age": "node scripts/check-package-age.mjs",
     "format": "biome check --write .",
-    "install:user": "bun run build && bun ./scripts/install-user.ts",
     "lint": "biome check .",
+    "prepack": "bun run build",
+    "release:dry-run": "semantic-release --dry-run",
+    "release:prepare": "semantic-release",
+    "test:package": "node scripts/test-package.mjs",
+    "test:packed": "bun run build && node scripts/test-packed-project.mjs",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "ajv": "^8.20.0",
-    "chalk": "^5.6.2",
-    "yaml": "^2.9.0",
-    "yargs": "^18.0.0",
-    "zod": "^4.4.3"
-  },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.4",
-    "@types/bun": "^1.3.14",
-    "@types/yargs": "^17.0.35",
-    "typescript": "^7.0.2"
+    "@biomejs/biome": "2.5.4",
+    "@cyclonedx/cyclonedx-npm": "6.0.0",
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "@semantic-release/changelog": "6.0.3",
+    "@semantic-release/commit-analyzer": "13.0.1",
+    "@semantic-release/github": "12.0.9",
+    "@semantic-release/release-notes-generator": "14.1.1",
+    "@types/bun": "1.3.14",
+    "@types/yargs": "17.0.35",
+    "ajv": "8.20.0",
+    "chalk": "5.6.2",
+    "conventional-changelog-conventionalcommits": "10.2.1",
+    "semantic-release": "25.0.7",
+    "typescript": "7.0.2",
+    "yaml": "2.9.0",
+    "yargs": "18.0.0",
+    "zod": "4.4.3"
   }
 }

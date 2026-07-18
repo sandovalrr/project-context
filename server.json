@@ -1,0 +1,46 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.sandovalrr/project-context",
+  "title": "Project Context",
+  "description": "Safely manage repository-scoped issues across Linear, GitHub Issues, and Jira Cloud.",
+  "version": "0.0.0",
+  "websiteUrl": "https://github.com/sandovalrr/project-context",
+  "repository": {
+    "url": "https://github.com/sandovalrr/project-context",
+    "source": "github",
+    "id": "1305077753"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@sandovalrr/project-context-mcp",
+      "version": "0.0.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "PROJECT_CONTEXT_CONFIG_DIR",
+          "description": "Optional absolute path to the host-local configuration directory",
+          "format": "filepath",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "PROJECT_CONTEXT_STATE_DIR",
+          "description": "Optional absolute path to the host-local runtime state directory",
+          "format": "filepath",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "PROJECT_CONTEXT_CWD",
+          "description": "Optional repository fallback when the MCP client provides no filesystem root",
+          "format": "filepath",
+          "isRequired": false,
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}

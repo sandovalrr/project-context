@@ -1,138 +1,101 @@
 # Architecture
 
-## Purpose
+## Purpose and boundaries
 
-Provide repository-aware issue handling for local agents without placing agent
-configuration or credentials inside application repositories. The first
-version supports Linear, GitHub Issues, and Jira Cloud. Pull requests, releases,
-Git authentication, commit signing, and general repository administration are
-out of scope.
+`project-context` provides repository-aware issue handling without placing
+agent configuration or credentials inside application repositories. Version
+0.1 supports Linear, GitHub Issues, and Jira Cloud through a local stdio MCP
+server and a diagnostic CLI. Hosted HTTP MCP, OAuth, pull requests, releases,
+Git authentication, commit signing, and repository administration are out of
+scope.
 
 ## Components
 
 ```text
-Agent / local MCP client
-          |
-          v
-project_issues MCP server  <-->  project-issues skill
-          |
-          v
-shared project-context core
+MCP client or CLI
+        |
+        v
+Node 22+ bundled executables
+  | working-directory/root allowlist
   | repository resolver
-  | YAML configuration + schema
+  | YAML schema and configuration
   | credential resolver
-  | deterministic router
-  | preview/apply engine
-  | redacted audit writer
-          |
-          +------ Linear adapter
-          +------ GitHub Issues adapter
-          +------ Jira Cloud adapter
+  | deterministic issue router
+  | encrypted preview/apply engine
+  | metadata-only audit writer
+        |
+        +------ Linear adapter
+        +------ GitHub Issues adapter
+        +------ Jira Cloud adapter
 ```
 
-The executable exposes the same core through a diagnostic CLI and a stdio MCP
-server. An agent sees one provider-neutral tool set rather than overlapping tools
-from multiple issue systems.
+`project-context-mcp` starts the stdio server directly. `project-context`
+exposes setup, diagnostics, the same issue operations, audit maintenance, and
+optional skill installation. The package bundles its JavaScript and has no npm
+runtime dependencies. Bun is the locked development, test, and build tool;
+published execution uses standard Node APIs.
 
-## Repository identity
+## Repository and working-directory identity
 
-The canonical identity is the normalized `origin` Git remote:
+The canonical repository identity is the normalized `origin` remote, for
+example `github.com/owner/repository` or
+`bitbucket.org/workspace/repository`. SSH and HTTPS normalize to the same ID.
+Host-local remote/path aliases cover forks and exceptional layouts. Ambiguity
+stops resolution.
 
-```text
-github.com/owner/repository
-bitbucket.org/workspace/repository
-```
+MCP client roots form an allowlist. An explicit tool `cwd` has highest priority,
+but when roots are present it must fall inside exactly one. Exactly one root can
+serve as the cwd; multiple roots require an explicit selection. Environment and
+process cwd are fallbacks only.
 
-SSH and HTTPS remotes normalize to the same identity. Host-local remote and path
-aliases cover forks, repositories without an origin, and exceptional layouts.
-The resolver stops on ambiguity. Version one resolves at the Git repository
-level only; subdirectories cannot silently change issue routing.
+## Configuration and identity
 
-## Configuration and state
+Reusable provider profiles bind credential aliases to expected identities.
+Project entries reference profiles and add their issue target. The source-code
+host and issue provider are independent.
 
-Host-local configuration defaults to:
-
-```text
-~/.agents/config/project-context/
-```
-
-The repository ships examples and schemas, but never real project mappings or
-credentials. `project-context setup` creates a starter configuration only when
-none exists. It never treats examples as routing data or overwrites existing
-configuration.
-
-Runtime state defaults to:
-
-```text
-~/.local/state/project-context/
-```
-
-It contains locks, short-lived HMAC-signed prepared operations, timestamped
-backups, and a metadata-only audit log. Prepared payloads may contain the issue
-content required for an approved change; they are mode-0600, expire after ten
-minutes, and are deleted after successful application. Provider credentials
-are never stored in runtime state.
-
-## Provider model
-
-Reusable global provider profiles define authentication aliases and expected
-identities. Project entries reference those profiles and add their specific
-issue target:
-
-- Linear: workspace profile plus required team and explicit project or `none`.
-- GitHub Issues: GitHub identity plus an explicit target repository or
-  `inherit` from a GitHub source repository.
-- Jira Cloud: Jira site/account identity plus a required Jira project.
-
-The source-code host and issue provider are independent. A Bitbucket repository
-may use GitHub Issues, Linear, Jira Cloud, or multiple configured providers.
-
-## Authentication
-
-Version one uses local API-key/token authentication:
-
-- Linear personal API key.
-- GitHub token, commonly resolved through `gh auth token`.
-- Jira Cloud account email plus API token.
-
-OAuth is deferred. Credential aliases resolve through host-local `file`,
-`command`, `environment`, `keychain`, or non-secret `literal` fields. Secrets
-must never appear in prompts, configuration previews, errors, logs, process
-arguments, or audit entries.
-
-Every provider profile binds a credential to an expected identity. Writes
-revalidate that identity immediately before execution. A valid credential for
-the wrong workspace, GitHub login, or Jira site/account is rejected.
+Every write revalidates the provider identity immediately before execution. A
+valid credential for the wrong Linear workspace, GitHub login, or Jira
+site/account is rejected. Provider origins are fixed to Linear, GitHub's public
+API, or the configured `*.atlassian.net` tenant.
 
 ## Mutation protocol
 
-All issue writes use two phases:
+All writes have two phases:
 
-1. Prepare: resolve repository/provider, validate identity and target, normalize
-   fields, fetch the current issue version when applicable, and return an exact
-   preview plus an opaque operation token.
-2. Apply: load the immutable prepared payload, revalidate repository,
-   configuration hash, credential identity, provider target, issue version, and
-   expiration before performing the mutation.
+1. Prepare resolves context, validates identity and target, normalizes fields,
+   fetches current issue state, and stores an encrypted payload for ten minutes.
+2. Apply atomically claims the token, decrypts it, and revalidates repository,
+   configuration hash, identity, target, issue version, and expiry before the
+   provider call.
 
-Prepared operations expire after ten minutes. A configuration change, target
-issue update, repository change, identity mismatch, or payload alteration
-invalidates the token and requires a new preview.
+Pending payloads use AES-256-GCM with a local mode-`0600` 256-bit key and
+authenticated token/expiry metadata. A token can be claimed only once. A
+failure after claim is marked `indeterminate`; the server never replays it
+because the remote provider may already have accepted the write.
 
-Permanent issue deletion is unsupported. Bulk changes require their own
-explicit preview and confirmation.
+The protocol technically enforces prepare-before-apply. Human approval between
+the calls is a client/agent responsibility, documented by the optional skill.
+See the threat model for this trust boundary.
 
-## Installation boundaries
+## Network behavior
 
-Core installation and agent-client registration are separate:
+All provider traffic uses HTTPS, rejects redirects, has a 20-second timeout,
+and caps response bodies at 2 MiB. Only read operations retry temporary
+429/502/503/504 responses. Writes are never automatically retried unless a
+future adapter introduces an explicit provider idempotency guarantee.
 
-```text
-bun run install:user
-project-context integration manifest
-```
+## Local state and observability
 
-The first installs the executable and shared skill without replacing host
-configuration. The second prints a client-neutral stdio MCP manifest; the user
-adds it through the chosen local agent client's configuration mechanism. Hosted
-agent clients are outside version-one scope when they cannot use local stdio
-MCP, configuration, or credential storage.
+Runtime state defaults to `~/.local/state/project-context/`. It contains the
+preview key, pending changes, backups, and a metadata-only mutation audit. Audit
+files rotate at 10 MiB with five retained rotations and can be listed or purged
+explicitly. Read operations are not audited. There is no telemetry or remote
+diagnostic export.
+
+## Distribution
+
+`server.json` describes the npm stdio package for the official MCP Registry.
+Releases include one npm tarball, a CycloneDX JSON application SBOM, and SHA-256
+checksums. The release workflow publishes that exact draft asset rather than
+rebuilding it. See `docs/releasing.md`.

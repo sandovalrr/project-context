@@ -1,42 +1,39 @@
 # Configuration
 
-## Locations
+## Host-local locations
 
 ```text
 ~/.agents/config/project-context/projects.yaml
 ~/.agents/config/project-context/credentials.yaml
 ~/.agents/config/project-context/templates/
 ~/.agents/config/project-context/secrets/
+~/.local/state/project-context/
 ```
 
-Override the configuration directory with `PROJECT_CONTEXT_CONFIG_DIR`.
+Override the first root with `PROJECT_CONTEXT_CONFIG_DIR` and the state root
+with `PROJECT_CONTEXT_STATE_DIR`. Both should be absolute, user-controlled
+paths. Directories are mode `0700`; configuration, secrets, pending changes,
+keys, and audit files are mode `0600`. Symlinks and broader permissions on
+security-sensitive files fail closed.
 
-Both YAML documents use an explicit schema version. Unsupported provider types
-invalidate the complete configuration. Newer schema versions are rejected;
-older versions require an explicit, previewed `project-context config migrate`.
+Both YAML registries use an explicit schema version. A newer version is
+rejected. `project-context config migrate` previews an available migration;
+`--apply` is required for atomic replacement and timestamped backup. Startup
+never migrates configuration.
 
 ## Project registry
 
-`projects.yaml` contains no credentials. Provider IDs are authoritative and
-names are display metadata. `project-context doctor` validates schema,
-references, permissions, credentials, and repository routing. It never
-substitutes another resource with the same name.
+`projects.yaml` contains routing and expected identity, never credentials.
+Provider IDs are authoritative; names are display metadata. A sanitized,
+complete starting point is in `examples/projects.example.yaml`.
 
 ```yaml
 version: 1
 
 providers:
-  linear-example:
-    type: linear
-    credential: linear-example
-    expected_identity:
-      workspace:
-        id: 98b7d4a0-0000-4000-8000-000000000001
-        name: Example Workspace
-
-  github-personal:
+  github-example:
     type: github
-    credential: github-personal
+    credential: github-example
     expected_identity:
       login: example-user
       host: github.com
@@ -46,42 +43,12 @@ projects:
     aliases:
       remotes: []
       paths: []
-
     issues:
-      default: linear
+      default: github
       providers:
-        linear:
-          type: linear
-          profile: linear-example
-          identifiers:
-            - '^ENG-[0-9]+$'
-          target:
-            team:
-              id: 98b7d4a0-0000-4000-8000-000000000002
-              name: Engineering
-            project:
-              id: 98b7d4a0-0000-4000-8000-000000000003
-              name: Platform
-          mappings:
-            status:
-              open: Backlog
-              in_progress: In Progress
-              done: Done
-              canceled: Canceled
-          create:
-            required: [title, description]
-            defaults:
-              priority: medium
-              labels: [engineering]
-            presets:
-              bug:
-                labels: [bug]
-                priority: high
-                template: bug-report
-
         github:
           type: github
-          profile: github-personal
+          profile: github-example
           target:
             repository: inherit
           mappings:
@@ -94,30 +61,19 @@ projects:
               canceled: closed
 ```
 
-When Linear intentionally has no project, declare it explicitly:
+Linear requires a team and an explicit project object or `none`. Jira Cloud
+requires a project ID/name. A GitHub target can be `inherit` for a GitHub source
+repository or an explicit `{id, owner, name}` object. A Bitbucket repository may
+route to any supported issue provider.
 
-```yaml
-target:
-  team:
-    id: team-id
-    name: Engineering
-  project: none
-```
-
-A GitHub Issues target may differ from the source repository:
-
-```yaml
-target:
-  repository:
-    id: github.com/acme/platform-issues
-    owner: acme
-    name: platform-issues
-```
+Run `project-context config validate` after every edit. Run
+`project-context doctor --cwd /path/to/repository` to also verify permissions,
+routing, and the active account.
 
 ## Credential registry
 
-`credentials.yaml` maps aliases to field resolvers. `project-context credential
-add` owns creation and replacement; manual secret entry in YAML is unsupported.
+`credentials.yaml` contains resolver instructions, not literal tokens. Literal
+credential values are invalid.
 
 ```yaml
 version: 1
@@ -129,7 +85,7 @@ credentials:
         source: file
         path: ~/.agents/config/project-context/secrets/linear-example
 
-  github-personal:
+  github-example:
     fields:
       token:
         source: command
@@ -138,20 +94,40 @@ credentials:
   jira-example:
     fields:
       email:
-        source: literal
-        value: developer@example.com
+        source: environment
+        variable: JIRA_EXAMPLE_EMAIL
       token:
         source: keychain
         service: project-context/jira-example
         account: developer@example.com
 ```
 
-Secret commands run without a shell. Output is trimmed, held only in memory,
-and redacted from errors. Environment-backed secrets are supported for CI and
-temporary sessions but are not the default.
+Resolvers:
 
-## Safe updates
+- `file`: reads one user-only regular file.
+- `environment`: reads a named variable from the MCP process environment.
+- `keychain`: reads the local OS credential store.
+- `command`: executes an argv array directly, never through a shell.
 
-All configuration writes acquire a lock, validate the complete result, create a
-timestamped backup, and replace atomically. The CLI never commits, pulls, pushes,
-or otherwise synchronizes configuration through Git.
+Command resolvers receive no stdin, time out after ten seconds, and may return
+at most 64 KiB. Their stdout and stderr are never included in errors. Use an
+absolute executable or a tightly controlled `PATH`; do not point a resolver at
+a repository script.
+
+For hidden file-backed token entry:
+
+```sh
+project-context credential add linear-example --field token
+project-context credential test linear-example
+```
+
+Secrets are held only long enough to make a provider request. They are excluded
+from previews, errors, diagnostics, audit events, and pending-change files.
+
+## Safe updates and backups
+
+Configuration writes acquire a lock, validate the entire result, create a
+timestamped backup, and replace atomically. The CLI never commits, pulls,
+pushes, or synchronizes host configuration through Git. Backups and templates
+may still contain sensitive organization metadata; protect them like the main
+configuration.

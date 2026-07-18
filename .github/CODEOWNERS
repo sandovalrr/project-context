@@ -1,0 +1,10 @@
+# Security-sensitive release and configuration surfaces require maintainer review.
+/.github/workflows/ @sandovalrr
+/.github/dependabot.yml @sandovalrr
+/release.config.mjs @sandovalrr
+/scripts/release-*.mjs @sandovalrr
+/scripts/verify-release.mjs @sandovalrr
+/server.json @sandovalrr
+/package.json @sandovalrr
+/bun.lock @sandovalrr
+/schemas/ @sandovalrr

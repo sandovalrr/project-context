@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { lstat, readFile } from "node:fs/promises";
 import Ajv2020, { type ErrorObject, type ValidateFunction } from "ajv/dist/2020.js";
 import { parseDocument } from "yaml";
@@ -22,6 +23,9 @@ function formatSchemaErrors(errors: ErrorObject[] | null | undefined): string {
 
 async function parseYamlFile(path: string): Promise<unknown> {
   const content = await readFile(path, "utf8").catch((error) => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new ProjectContextError("CONFIG_NOT_FOUND", `Configuration file ${path} was not found`);
+    }
     throw new ProjectContextError("CONFIG_READ_FAILED", `Cannot read configuration ${path}`, {
       cause: error,
     });
@@ -41,7 +45,15 @@ async function assertSecureHostConfig(path: string): Promise<void> {
   const resolved = absolutePath(path);
   const paths = getPaths();
   if (resolved !== paths.projectsFile && resolved !== paths.credentialsFile) return;
-  const metadata = await lstat(resolved);
+  const metadata = await lstat(resolved).catch((error) => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new ProjectContextError(
+        "CONFIG_NOT_FOUND",
+        `Configuration file ${resolved} was not found`,
+      );
+    }
+    throw error;
+  });
   if (!metadata.isFile() || metadata.isSymbolicLink() || (metadata.mode & 0o077) !== 0) {
     throw new ProjectContextError(
       "CONFIG_PERMISSIONS_UNSAFE",
@@ -139,9 +151,7 @@ export function validateRegistryReferences(
 }
 
 export function hashConfiguration(value: unknown): string {
-  const hasher = new Bun.CryptoHasher("sha256");
-  hasher.update(stableStringify(value));
-  return hasher.digest("hex");
+  return createHash("sha256").update(stableStringify(value)).digest("hex");
 }
 
 function stableStringify(value: unknown): string {

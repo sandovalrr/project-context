@@ -44,11 +44,16 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
         },
         body: JSON.stringify({ query, variables }),
       },
+      {
+        provider: "Linear",
+        allowedOrigin: "https://api.linear.app",
+        access: query.trimStart().startsWith("mutation") ? "write" : "read",
+      },
     );
     if (result.errors?.length || !result.data) {
       throw new ProjectContextError(
         "LINEAR_GRAPHQL_ERROR",
-        `Linear GraphQL request failed${result.errors?.length ? `: ${result.errors.map((error) => error.message).join("; ")}` : ""}`,
+        "Linear GraphQL request failed; provider response details were redacted",
       );
     }
     return result.data;

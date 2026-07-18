@@ -1,118 +1,95 @@
 # Contributing to project-context
 
-Thank you for helping improve project-context. Contributions should preserve
-its provider-neutral design, security boundaries, and predictable issue
-handling.
+Thank you for helping improve project-context. Contributions must preserve its
+provider-neutral issue scope, local security boundaries, and predictable
+two-phase write behavior.
 
 ## Prerequisites
 
-- Git.
-- Bun 1.3.14, as declared by `packageManager` in `package.json` and by
-  `mise.toml`. You may install it directly or run `mise install`.
-- A Linux or macOS development environment. Continuous integration runs on
-  Ubuntu.
+- Git and Node.js 22 or 24.
+- Bun 1.3.14, pinned in `package.json` and `mise.toml`.
+- Linux or macOS. CI validates both operating systems.
 
-Provider accounts and credentials are not required for the test suite. Never
-commit real project mappings, access tokens, API keys, credential files, or
-runtime state. Host-specific data belongs under the paths documented in
-`README.md`.
+Install exactly the locked dependency graph:
 
-## Set up the project
+```sh
+bun ci
+bun run check
+bun run test:packed
+```
 
-1. Fork the repository and clone your fork.
-2. Create a focused branch from `main`.
-3. Install the exact locked dependencies:
+The lockfile and `bunfig.toml` enforce a 48-hour cooling-off period for every
+new direct or transitive npm package version. Do not bypass it. Exact direct
+dependency versions are required.
 
-   ```sh
-   bun ci
-   ```
+Provider accounts are unnecessary for tests. Never commit tokens, real project
+mappings, account names, credential files, runtime state, release artifacts, or
+history-backup bundles.
 
-4. Confirm the baseline is healthy:
+## Scope and architecture
 
-   ```sh
-   bun run check
-   bun run build
-   ```
+Read `docs/architecture.md`, `docs/configuration.md`,
+`docs/routing-and-safety.md`, and `docs/threat-model.md` before changing core
+behavior. Keep the CLI, MCP schemas, examples, docs, and optional skill aligned.
 
-For substantial behavior or architecture changes, open an issue before doing
-the implementation so the intended scope can be agreed upon.
-
-## Architecture and scope
-
-Read these documents before changing core behavior:
-
-- `docs/architecture.md` defines the system boundaries.
-- `docs/configuration.md` defines host-local configuration.
-- `docs/routing-and-safety.md` defines provider routing and write safeguards.
-- `docs/provider-behavior.md` defines provider-specific behavior.
-
-Issue handling is in scope. Pull requests, releases, Git authentication,
-commit signing, and repository administration are intentionally out of scope.
-Keep the CLI, MCP tools, schemas, examples, documentation, and agent skill in
-sync when a contract changes.
+Issue handling is in scope. Pull requests, releases as an MCP capability,
+repository administration, Git identities, and SSH configuration are not.
 
 ## Code style
 
-- Do not use `let`. Prefer immutable `const` bindings and extract branches or
-  state transitions into focused functions that return their result.
-- Do not conceal reassignment through object or array mutation.
-- Group declarations by purpose and separate distinct declaration groups with
-  a blank line.
-- Favor early returns, explicit error codes, narrow interfaces, and readable
-  names over clever abstractions.
-- Preserve the existing two-space formatting and double-quoted TypeScript
-  strings. Biome is the source of truth for automated formatting and linting.
+- Do not use `let`. Split mutable cases into focused functions that return a
+  result.
+- Do not hide reassignment through mutable arrays or objects.
+- Group related declarations and separate distinct groups with blank lines.
+- Prefer early returns, explicit error codes, narrow interfaces, and readable
+  names.
+- Use two-space indentation and double-quoted TypeScript strings. Biome is the
+  formatting and linting authority.
 
-Run formatting before submitting a change:
+Add deterministic tests before implementation when behavior changes. Tests
+must not make live provider calls or require real credentials.
+
+## Validation
+
+Run before opening a pull request:
 
 ```sh
 bun run format
-```
-
-## Tests and validation
-
-Add or update tests for every behavior change. Tests must be deterministic,
-must not depend on real provider credentials, and must not make live provider
-requests. Use the existing injected fetchers and temporary configuration
-patterns.
-
-Before opening a pull request, run the same checks as continuous integration:
-
-```sh
-bun run typecheck
-bun run lint
-bun test
-bun run build
+bun run check
+bun run check:package-age
 bun audit --audit-level=high
+bun run test:packed
 ```
+
+CI repeats source checks and tests the npm tarball on Node 22 and 24 across
+Ubuntu and macOS. Node 26 is a non-blocking forward-compatibility smoke test.
 
 ## Commits and pull requests
 
-- Keep commits focused and use an imperative summary.
-- Explain the motivation, user-visible behavior, and security impact in the
-  pull request description.
-- Link relevant issues and describe the validation performed.
-- Include documentation and examples when behavior or configuration changes.
-- Confirm that no secrets, personal host configuration, generated binaries,
-  or unrelated changes are included.
-- Wait for all required continuous-integration checks to pass.
+Use Conventional Commit subjects because semantic-release derives versions and
+release notes from them:
 
-Maintainers may request revisions when a change broadens scope, weakens a
-security boundary, silently changes provider behavior, or lacks appropriate
-tests.
+```text
+fix: reject redirected provider responses
+feat: add a provider-neutral issue operation
+feat!: change a public MCP tool contract
+```
 
-## Security reports
+Before 1.0, breaking changes normally produce a minor release; the maintainer
+must explicitly authorize the first 1.0 release. Keep commits focused. Pull
+requests should explain motivation, user-visible behavior, security impact,
+tests, and related issues.
 
-Do not report vulnerabilities or exposed credentials in a public issue. Follow
-the private reporting process in `SECURITY.md`.
+CODEOWNERS review is required for workflows, release code, schemas, package
+metadata, and registry metadata. Do not create tags or edit release versions by
+hand; follow `docs/releasing.md`.
 
 ## License and attribution
 
-By contributing, you agree that your contribution is licensed under the MIT
-License. The MIT copyright and permission notice must remain with copies or
-substantial portions of the software.
+Contributions are licensed under the MIT License. The copyright and permission
+notice must remain with copies or substantial portions of the software.
 
-If you use this repository as the starting point for another project, please
-also include a visible acknowledgment such as:
+If you use this repository as a starting point, please include a visible
+acknowledgment such as:
 
 > Based on project-context, created by Richard Sandoval.

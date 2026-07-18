@@ -33,7 +33,7 @@ export class GitHubIssuesAdapter implements IssueProviderAdapter {
     private readonly fetcher: typeof fetch = fetch,
     inheritedRepository?: { owner: string; name: string },
   ) {
-    this.#baseUrl = profile.expected_identity.api_base_url ?? "https://api.github.com";
+    this.#baseUrl = "https://api.github.com";
     if (target.repository === "inherit" && !inheritedRepository) {
       throw new Error("GitHub inherit target needs a repository");
     }
@@ -44,16 +44,25 @@ export class GitHubIssuesAdapter implements IssueProviderAdapter {
   }
 
   #request<T>(path: string, method = "GET", body?: unknown): Promise<T> {
-    return requestJson<T>(this.fetcher, `${this.#baseUrl}${path}`, {
-      method,
-      headers: {
-        Accept: "application/vnd.github+json",
-        Authorization: `Bearer ${this.credential.token ?? ""}`,
-        "X-GitHub-Api-Version": "2022-11-28",
-        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+    return requestJson<T>(
+      this.fetcher,
+      `${this.#baseUrl}${path}`,
+      {
+        method,
+        headers: {
+          Accept: "application/vnd.github+json",
+          Authorization: `Bearer ${this.credential.token ?? ""}`,
+          "X-GitHub-Api-Version": "2022-11-28",
+          ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    });
+      {
+        provider: "GitHub",
+        allowedOrigin: this.#baseUrl,
+        access: method === "GET" ? "read" : "write",
+      },
+    );
   }
 
   #issuePath(suffix = ""): string {
