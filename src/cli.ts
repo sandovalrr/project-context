@@ -6,8 +6,10 @@ import {
   validateRegistryReferences,
 } from "./core/config.ts";
 import { resolveProjectContext } from "./core/context.ts";
+import { addFileCredential, resolveCredentialAlias } from "./core/credentials.ts";
 import { errorMessage, ProjectContextError } from "./core/errors.ts";
 import { getPaths } from "./core/paths.ts";
+import { promptHidden } from "./core/prompt.ts";
 import { setupHostConfiguration } from "./core/setup.ts";
 
 const HELP = `project-context
@@ -19,6 +21,8 @@ Usage:
   project-context doctor [--cwd <path>]
   project-context config validate
   project-context config migrate
+  project-context credential add <alias> [--field <name>] [--replace]
+  project-context credential test <alias>
   project-context --help
 `;
 
@@ -121,6 +125,26 @@ async function main(): Promise<void> {
       migrated: false,
       reason: `Configuration is already schema version ${result.schema_version}`,
     });
+    return;
+  }
+  if (command === "credential" && subcommand === "add") {
+    const alias = args[2];
+    if (!alias) {
+      throw new ProjectContextError("ARGUMENT_REQUIRED", "credential add requires an alias");
+    }
+    const field = option(args, "--field") ?? "token";
+    const secret = await promptHidden(`Secret for ${alias}.${field}: `);
+    print(await addFileCredential(alias, field, secret, { replace: args.includes("--replace") }));
+    return;
+  }
+  if (command === "credential" && subcommand === "test") {
+    const alias = args[2];
+    if (!alias) {
+      throw new ProjectContextError("ARGUMENT_REQUIRED", "credential test requires an alias");
+    }
+    const credentials = await loadCredentialConfig(getPaths().credentialsFile);
+    const resolved = await resolveCredentialAlias(credentials, alias);
+    print({ alias, valid: true, fields: Object.keys(resolved).sort() });
     return;
   }
 
