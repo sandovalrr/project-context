@@ -1,12 +1,41 @@
 import { describe, expect, test } from "bun:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { parse } from "yaml";
 import { packageVersionsFromLockDiff } from "../scripts/check-package-age.mjs";
 import { normalizeReleaseType } from "../scripts/release-analyzer.mjs";
 import { synchronizeReleaseVersion } from "../scripts/release-prepare.mjs";
 import { withTemporaryDirectory } from "./helpers/temporary.ts";
 
 describe("release policy", () => {
+  test("limits release writes to the short-lived GitHub App token", async () => {
+    const workflow = parse(
+      await readFile(join(process.cwd(), ".github/workflows/prepare-release.yml"), "utf8"),
+    );
+    const steps = workflow.jobs.prepare.steps;
+    const tokenStep = steps.find(({ id }) => id === "release-app");
+    const checkoutStep = steps.find(
+      ({ name }) => name === "Check out main with release credentials",
+    );
+    const releaseStep = steps.find(
+      ({ name }) => name === "Prepare the release commit, tag, artifacts, and draft",
+    );
+    const appClientIdExpression = `\${{ vars.RELEASE_APP_CLIENT_ID }}`;
+    const privateKeyExpression = `\${{ secrets.RELEASE_APP_PRIVATE_KEY }}`;
+    const releaseTokenExpression = `\${{ steps.release-app.outputs.token }}`;
+
+    expect(workflow.permissions.contents).toBe("read");
+    expect(tokenStep.uses).toMatch(/^actions\/create-github-app-token@[0-9a-f]{40}$/);
+    expect(tokenStep.with).toEqual({
+      "client-id": appClientIdExpression,
+      "private-key": privateKeyExpression,
+      repositories: "project-context",
+      "permission-contents": "write",
+    });
+    expect(checkoutStep.with.token).toBe(releaseTokenExpression);
+    expect(releaseStep.env.GITHUB_TOKEN).toBe(releaseTokenExpression);
+  });
+
   test("keeps breaking changes pre-1.0 until the explicit 1.0 confirmation", () => {
     expect(normalizeReleaseType("0.4.2", "major", false)).toBe("minor");
     expect(normalizeReleaseType("0.4.2", "major", true)).toBe("major");

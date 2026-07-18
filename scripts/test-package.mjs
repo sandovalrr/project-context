@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -21,10 +21,24 @@ try {
   if (metadata.dependencies && Object.keys(metadata.dependencies).length > 0) {
     throw new Error("Published package must not install runtime dependencies");
   }
+  const expectedBins = {
+    "project-context": "dist/project-context.js",
+    "project-context-mcp": "dist/project-context-mcp.js",
+  };
+  if (JSON.stringify(metadata.bin) !== JSON.stringify(expectedBins)) {
+    throw new Error(`Published package has invalid command shims: ${JSON.stringify(metadata.bin)}`);
+  }
 
   const cliPath = join(packageRoot, "dist", "project-context.js");
   const mcpPath = join(packageRoot, "dist", "project-context-mcp.js");
-  const version = await executeFile(process.execPath, [cliPath, "--version"]);
+  const installedCli = await realpath(join(directory, "node_modules", ".bin", "project-context"));
+  const installedMcp = await realpath(
+    join(directory, "node_modules", ".bin", "project-context-mcp"),
+  );
+  if (installedCli !== (await realpath(cliPath)) || installedMcp !== (await realpath(mcpPath))) {
+    throw new Error("npm command shims do not resolve to the packaged executables");
+  }
+  const version = await executeFile(installedCli, ["--version"]);
   if (version.stdout.trim() !== metadata.version)
     throw new Error("CLI version does not match package");
 

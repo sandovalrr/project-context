@@ -9,16 +9,25 @@ then publishes the exact draft tarball to npm and the official MCP Registry.
 
 1. Create a protected GitHub environment named `release` with required
    reviewer approval.
-2. Protect `main`, require the CI checks, prevent tag deletion/rewrites, and
-   allow the GitHub Actions app to create the semantic-release commit and tag.
-3. Enable private vulnerability reporting and Dependabot alerts.
-4. Keep Actions workflow permissions read-only by default. The prepare workflow
-   alone receives `contents: write`; the publish workflow receives
-   `contents: read` and `id-token: write`.
-5. Require CODEOWNERS review for workflows, release scripts, schemas, lockfiles,
-   and package/registry metadata.
+2. Register a private release GitHub App with webhooks disabled and repository
+   `Contents: read and write` as its only mutable permission. Install it only on
+   this repository.
+3. Store the App client ID as the `RELEASE_APP_CLIENT_ID` environment variable
+   and its private key as the `RELEASE_APP_PRIVATE_KEY` environment secret.
+4. Protect `main`, require the CI checks, prevent release-tag creation,
+   deletion, or rewrites, and grant ruleset bypass only to the release App.
+5. Enable private vulnerability reporting and Dependabot alerts.
+6. Keep the built-in Actions token read-only. The prepare workflow creates a
+   short-lived, repository-scoped App token with `contents: write`; the publish
+   workflow receives `contents: read` and `id-token: write`.
+7. Maintain CODEOWNERS coverage for workflows, release scripts, schemas,
+   lockfiles, and package/registry metadata. Enable required CODEOWNERS review
+   after a second trusted maintainer can approve changes from the repository
+   owner; requiring it earlier would deadlock owner-authored pull requests.
 
 No long-lived npm or MCP Registry publishing token belongs in GitHub secrets.
+The release App token is generated on demand and revoked when the preparation
+job finishes.
 
 ## Bootstrap npm ownership
 
