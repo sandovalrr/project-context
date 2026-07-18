@@ -1,0 +1,305 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://project-context.local/schemas/projects.schema.json",
+  "title": "project-context project registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "providers", "projects"],
+  "properties": {
+    "version": { "const": 1 },
+    "providers": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/alias" },
+      "additionalProperties": { "$ref": "#/$defs/providerProfile" }
+    },
+    "projects": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/repositoryId" },
+      "additionalProperties": { "$ref": "#/$defs/project" }
+    }
+  },
+  "$defs": {
+    "alias": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,62}$"
+    },
+    "repositoryId": {
+      "type": "string",
+      "pattern": "^[a-z0-9.-]+/[^/\\s]+/[^/\\s]+$"
+    },
+    "identityRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 }
+      }
+    },
+    "providerProfile": {
+      "oneOf": [
+        { "$ref": "#/$defs/linearProfile" },
+        { "$ref": "#/$defs/githubProfile" },
+        { "$ref": "#/$defs/jiraProfile" }
+      ]
+    },
+    "linearProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "credential", "expected_identity"],
+      "properties": {
+        "type": { "const": "linear" },
+        "credential": { "$ref": "#/$defs/alias" },
+        "expected_identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["workspace"],
+          "properties": { "workspace": { "$ref": "#/$defs/identityRef" } }
+        }
+      }
+    },
+    "githubProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "credential", "expected_identity"],
+      "properties": {
+        "type": { "const": "github" },
+        "credential": { "$ref": "#/$defs/alias" },
+        "expected_identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["login", "host"],
+          "properties": {
+            "login": { "type": "string", "minLength": 1 },
+            "host": { "type": "string", "minLength": 1 },
+            "api_base_url": { "type": "string", "pattern": "^https://" }
+          }
+        }
+      }
+    },
+    "jiraProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "credential", "expected_identity"],
+      "properties": {
+        "type": { "const": "jira-cloud" },
+        "credential": { "$ref": "#/$defs/alias" },
+        "expected_identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["site", "account_id"],
+          "properties": {
+            "site": { "type": "string", "minLength": 1 },
+            "account_id": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issues"],
+      "properties": {
+        "aliases": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "remotes": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+            "paths": { "type": "array", "uniqueItems": true, "items": { "type": "string" } }
+          }
+        },
+        "issues": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["default", "providers"],
+          "properties": {
+            "default": { "$ref": "#/$defs/alias" },
+            "providers": {
+              "type": "object",
+              "minProperties": 1,
+              "propertyNames": { "$ref": "#/$defs/alias" },
+              "additionalProperties": { "$ref": "#/$defs/projectProvider" }
+            }
+          }
+        }
+      }
+    },
+    "projectProvider": {
+      "oneOf": [
+        { "$ref": "#/$defs/linearProjectProvider" },
+        { "$ref": "#/$defs/githubProjectProvider" },
+        { "$ref": "#/$defs/jiraProjectProvider" }
+      ]
+    },
+    "projectProviderBase": {
+      "type": "object",
+      "properties": {
+        "profile": { "$ref": "#/$defs/alias" },
+        "identifiers": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "mappings": { "$ref": "#/$defs/mappings" },
+        "create": { "$ref": "#/$defs/createPolicy" }
+      }
+    },
+    "linearProjectProvider": {
+      "allOf": [
+        { "$ref": "#/$defs/projectProviderBase" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "profile", "target"],
+          "properties": {
+            "type": { "const": "linear" },
+            "profile": { "$ref": "#/$defs/alias" },
+            "identifiers": { "type": "array", "items": { "type": "string" } },
+            "target": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["team", "project"],
+              "properties": {
+                "team": { "$ref": "#/$defs/identityRef" },
+                "project": {
+                  "oneOf": [
+                    { "$ref": "#/$defs/identityRef" },
+                    { "const": "none" }
+                  ]
+                }
+              }
+            },
+            "mappings": { "$ref": "#/$defs/mappings" },
+            "create": { "$ref": "#/$defs/createPolicy" }
+          }
+        }
+      ]
+    },
+    "githubProjectProvider": {
+      "allOf": [
+        { "$ref": "#/$defs/projectProviderBase" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "profile", "target"],
+          "properties": {
+            "type": { "const": "github" },
+            "profile": { "$ref": "#/$defs/alias" },
+            "identifiers": { "type": "array", "items": { "type": "string" } },
+            "target": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["repository"],
+              "properties": {
+                "repository": {
+                  "oneOf": [
+                    { "const": "inherit" },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["id", "owner", "name"],
+                      "properties": {
+                        "id": { "$ref": "#/$defs/repositoryId" },
+                        "owner": { "type": "string", "minLength": 1 },
+                        "name": { "type": "string", "minLength": 1 }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "mappings": { "$ref": "#/$defs/mappings" },
+            "create": { "$ref": "#/$defs/createPolicy" }
+          }
+        }
+      ]
+    },
+    "jiraProjectProvider": {
+      "allOf": [
+        { "$ref": "#/$defs/projectProviderBase" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "profile", "target"],
+          "properties": {
+            "type": { "const": "jira-cloud" },
+            "profile": { "$ref": "#/$defs/alias" },
+            "identifiers": { "type": "array", "items": { "type": "string" } },
+            "target": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["project"],
+              "properties": { "project": { "$ref": "#/$defs/identityRef" } }
+            },
+            "mappings": { "$ref": "#/$defs/mappings" },
+            "create": { "$ref": "#/$defs/createPolicy" }
+          }
+        }
+      ]
+    },
+    "mappings": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "type": "object",
+          "propertyNames": { "enum": ["open", "in_progress", "done", "canceled"] },
+          "additionalProperties": {
+            "oneOf": [
+              { "type": "string", "minLength": 1 },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "state": { "type": "string", "minLength": 1 },
+                  "add_labels": { "type": "array", "items": { "type": "string" } },
+                  "remove_labels": { "type": "array", "items": { "type": "string" } }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "createPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "required": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["title", "description"] }
+        },
+        "defaults": { "$ref": "#/$defs/issueFields" },
+        "presets": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/alias" },
+          "additionalProperties": { "$ref": "#/$defs/preset" }
+        }
+      }
+    },
+    "issueFields": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "priority": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "number" }
+          ]
+        },
+        "labels": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+        "assignee": { "type": "string" }
+      }
+    },
+    "preset": {
+      "allOf": [
+        { "$ref": "#/$defs/issueFields" },
+        {
+          "type": "object",
+          "properties": { "template": { "$ref": "#/$defs/alias" } }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,67 @@
+version: 1
+
+providers:
+  linear-example:
+    type: linear
+    credential: linear-example
+    expected_identity:
+      workspace:
+        id: 00000000-0000-4000-8000-000000000001
+        name: Example Workspace
+
+  github-example:
+    type: github
+    credential: github-example
+    expected_identity:
+      login: example-user
+      host: github.com
+
+  jira-example:
+    type: jira-cloud
+    credential: jira-example
+    expected_identity:
+      site: example.atlassian.net
+      account_id: example-account-id
+
+projects:
+  github.com/example/example-repository:
+    aliases:
+      remotes: []
+      paths: []
+    issues:
+      default: linear
+      providers:
+        linear:
+          type: linear
+          profile: linear-example
+          identifiers: ['^ENG-[0-9]+$']
+          target:
+            team:
+              id: 00000000-0000-4000-8000-000000000002
+              name: Engineering
+            project: none
+          mappings:
+            status:
+              open: Backlog
+              in_progress: In Progress
+              done: Done
+              canceled: Canceled
+          create:
+            required: [title, description]
+            defaults:
+              labels: [engineering]
+            presets:
+              bug:
+                labels: [bug]
+                template: bug-report
+
+        github:
+          type: github
+          profile: github-example
+          target:
+            repository: inherit
+          mappings:
+            status:
+              open: open
+              done: closed
+

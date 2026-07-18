@@ -1,0 +1,12 @@
+node_modules/
+dist/
+coverage/
+.DS_Store
+*.log
+
+# Host-local configuration, credentials, and runtime state never belong here.
+config/projects.yaml
+config/credentials.yaml
+config/secrets/
+.project-context/
+
