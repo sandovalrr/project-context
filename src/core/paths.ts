@@ -29,6 +29,7 @@ export function getPaths() {
     stateDirectory,
     backupsDirectory: join(stateDirectory, "backups"),
     pendingDirectory: join(stateDirectory, "pending"),
+    previewKeyFile: join(stateDirectory, "preview.key"),
     auditFile: join(stateDirectory, "audit.jsonl"),
     lockFile: join(stateDirectory, "config.lock"),
   };

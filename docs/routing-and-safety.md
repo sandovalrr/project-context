@@ -26,8 +26,8 @@ context after disclosing that it is outside configured context.
 Before a session-only write, show the temporary repository, provider,
 workspace/project target, and scope, then require explicit confirmation. This
 fallback is available only when the whole repository is unconfigured. It cannot
-bypass an existing repository boundary. Offer `project-context init`, but never
-modify global configuration without approval.
+bypass an existing repository boundary. Point to the shipped configuration
+example, but never modify global configuration without approval.
 
 ## Provider failures
 

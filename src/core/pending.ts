@@ -1,4 +1,5 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ProjectContextError } from "./errors.ts";
 import { getPaths } from "./paths.ts";
@@ -42,6 +43,30 @@ function pendingPath(token: string): string {
   return join(getPaths().pendingDirectory, `${token}.json`);
 }
 
+async function previewKey(): Promise<Buffer> {
+  const paths = getPaths();
+  await mkdir(paths.stateDirectory, { recursive: true, mode: 0o700 });
+  try {
+    await writeFile(paths.previewKeyFile, randomBytes(32), { mode: 0o600, flag: "wx" });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  }
+  const metadata = await lstat(paths.previewKeyFile);
+  if (!metadata.isFile() || metadata.isSymbolicLink() || (metadata.mode & 0o077) !== 0) {
+    throw new ProjectContextError(
+      "PREVIEW_KEY_UNSAFE",
+      `Preview signing key ${paths.previewKeyFile} must be a regular mode-0600 file`,
+    );
+  }
+  return readFile(paths.previewKeyFile);
+}
+
+async function signPendingChange(payload: PendingChange): Promise<string> {
+  return createHmac("sha256", await previewKey())
+    .update(JSON.stringify(payload))
+    .digest("hex");
+}
+
 function assertPendingChange(value: unknown): asserts value is PendingChange {
   if (!value || typeof value !== "object") {
     throw new ProjectContextError("PREVIEW_INVALID", "Stored issue preview is invalid");
@@ -76,7 +101,11 @@ export async function createPendingChange(
     ...input,
   };
   await mkdir(getPaths().pendingDirectory, { recursive: true, mode: 0o700 });
-  await writeFile(pendingPath(token), `${JSON.stringify(pending)}\n`, { mode: 0o600, flag: "wx" });
+  await writeFile(
+    pendingPath(token),
+    `${JSON.stringify({ payload: pending, signature: await signPendingChange(pending) })}\n`,
+    { mode: 0o600, flag: "wx" },
+  );
   return pending;
 }
 
@@ -90,11 +119,27 @@ export async function readPendingChange(token: string): Promise<PendingChange> {
     }
     throw error;
   }
-  assertPendingChange(value);
-  if (value.token !== token) {
+  if (!value || typeof value !== "object") {
+    throw new ProjectContextError("PREVIEW_INVALID", "Stored issue preview is invalid");
+  }
+  const wrapper = value as { payload?: unknown; signature?: unknown };
+  assertPendingChange(wrapper.payload);
+  if (typeof wrapper.signature !== "string" || !/^[0-9a-f]{64}$/.test(wrapper.signature)) {
+    throw new ProjectContextError("PREVIEW_INVALID", "Stored issue preview signature is invalid");
+  }
+  const expected = Buffer.from(await signPendingChange(wrapper.payload), "hex");
+  const actual = Buffer.from(wrapper.signature, "hex");
+  if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
+    await rm(pendingPath(token), { force: true });
+    throw new ProjectContextError(
+      "PREVIEW_TAMPERED",
+      "Stored issue preview failed its integrity check and was invalidated",
+    );
+  }
+  if (wrapper.payload.token !== token) {
     throw new ProjectContextError("PREVIEW_INVALID", "Stored issue preview token does not match");
   }
-  return value;
+  return wrapper.payload;
 }
 
 export async function validatePendingChange(

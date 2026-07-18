@@ -1,9 +1,10 @@
-import { readFile } from "node:fs/promises";
+import { lstat, readFile } from "node:fs/promises";
 import Ajv2020, { type ErrorObject, type ValidateFunction } from "ajv/dist/2020.js";
 import { parseDocument } from "yaml";
 import credentialsSchema from "../../schemas/credentials.schema.json";
 import projectsSchema from "../../schemas/projects.schema.json";
 import { ProjectContextError } from "./errors.ts";
+import { absolutePath, getPaths } from "./paths.ts";
 import type { CredentialsConfig, ProjectsConfig } from "./types.ts";
 
 const ajv = new Ajv2020({ allErrors: true, strict: true });
@@ -39,7 +40,21 @@ async function parseYamlFile(path: string): Promise<unknown> {
   return document.toJS();
 }
 
+async function assertSecureHostConfig(path: string): Promise<void> {
+  const resolved = absolutePath(path);
+  const paths = getPaths();
+  if (resolved !== paths.projectsFile && resolved !== paths.credentialsFile) return;
+  const metadata = await lstat(resolved);
+  if (!metadata.isFile() || metadata.isSymbolicLink() || (metadata.mode & 0o077) !== 0) {
+    throw new ProjectContextError(
+      "CONFIG_PERMISSIONS_UNSAFE",
+      `Host configuration ${resolved} must be a regular mode-0600 file`,
+    );
+  }
+}
+
 export async function loadProjectsConfig(path: string): Promise<ProjectsConfig> {
+  await assertSecureHostConfig(path);
   const value = await parseYamlFile(path);
   if (!validateProjectsSchema(value)) {
     throw new ProjectContextError(
@@ -52,6 +67,7 @@ export async function loadProjectsConfig(path: string): Promise<ProjectsConfig> 
 }
 
 export async function loadCredentialConfig(path: string): Promise<CredentialsConfig> {
+  await assertSecureHostConfig(path);
   const value = await parseYamlFile(path);
   if (!validateCredentialsSchema(value)) {
     throw new ProjectContextError(

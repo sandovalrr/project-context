@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getPaths } from "../src/core/paths.ts";
@@ -101,5 +101,16 @@ describe("two-phase issue changes", () => {
         new Date("2026-07-18T10:10:00Z"),
       ),
     ).rejects.toThrow("expired");
+  });
+
+  test("invalidates a modified preview payload", async () => {
+    const pending = await fixture();
+    const path = join(getPaths().pendingDirectory, `${pending.token}.json`);
+    const stored = JSON.parse(await readFile(path, "utf8"));
+    stored.payload.request.body = "modified";
+    await writeFile(path, JSON.stringify(stored));
+
+    await expect(readPendingChange(pending.token)).rejects.toThrow("integrity check");
+    await expect(readFile(path)).rejects.toThrow();
   });
 });

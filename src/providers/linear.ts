@@ -69,6 +69,67 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
     };
   }
 
+  #priority(value: string | number): number {
+    if (typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 4)
+      return value;
+    const normalized = String(value).trim().toLowerCase().replaceAll("_", " ");
+    const priorities: Record<string, number> = {
+      "no priority": 0,
+      none: 0,
+      urgent: 1,
+      high: 2,
+      medium: 3,
+      low: 4,
+    };
+    const priority = priorities[normalized];
+    if (priority === undefined) {
+      throw new ProjectContextError(
+        "LINEAR_PRIORITY_INVALID",
+        `Unsupported Linear priority ${value}; use none, urgent, high, medium, low, or 0-4`,
+      );
+    }
+    return priority;
+  }
+
+  async #labelIds(names: string[]): Promise<string[]> {
+    const data = await this.#graphql<{
+      issueLabels: { nodes: Array<{ id: string; name: string }> };
+    }>(
+      `query Labels($teamId: ID!) {
+        issueLabels(filter: { team: { id: { eq: $teamId } } }) { nodes { id name } }
+      }`,
+      { teamId: this.target.team.id },
+    );
+    return names.map((name) => {
+      const matches = data.issueLabels.nodes.filter(
+        (label) => label.name.localeCompare(name, undefined, { sensitivity: "accent" }) === 0,
+      );
+      if (matches.length !== 1) {
+        throw new ProjectContextError(
+          "LINEAR_LABEL_AMBIGUOUS",
+          `Linear label ${name} resolved to ${matches.length} labels`,
+        );
+      }
+      return matches[0]?.id as string;
+    });
+  }
+
+  async #input(input: IssueUpdateInput | IssueCreateInput): Promise<Record<string, unknown>> {
+    if ("issueType" in input && input.issueType !== undefined) {
+      throw new ProjectContextError(
+        "FIELD_UNSUPPORTED",
+        "Linear does not support the generic issueType field",
+      );
+    }
+    return {
+      ...(input.title === undefined ? {} : { title: input.title }),
+      ...(input.description === undefined ? {} : { description: input.description }),
+      ...(input.priority === undefined ? {} : { priority: this.#priority(input.priority) }),
+      ...(input.assignee === undefined ? {} : { assigneeId: input.assignee }),
+      ...(input.labels === undefined ? {} : { labelIds: await this.#labelIds(input.labels) }),
+    };
+  }
+
   async identity(): Promise<ProviderIdentity> {
     const data = await this.#graphql<{
       viewer: { id: string; name: string; email: string };
@@ -117,12 +178,9 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
   async create(input: IssueCreateInput): Promise<IssueSnapshot> {
     const variables = {
       input: {
-        title: input.title,
+        ...(await this.#input(input)),
         teamId: this.target.team.id,
         ...(this.target.project === "none" ? {} : { projectId: this.target.project.id }),
-        ...(input.description === undefined ? {} : { description: input.description }),
-        ...(input.priority === undefined ? {} : { priority: input.priority }),
-        ...(input.assignee === undefined ? {} : { assigneeId: input.assignee }),
       },
     };
     const data = await this.#graphql<{ issueCreate: { success: boolean; issue: LinearIssue } }>(
@@ -141,6 +199,10 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
   }
 
   async update(identifier: string, input: IssueUpdateInput): Promise<IssueSnapshot> {
+    return this.#updateRaw(identifier, await this.#input(input));
+  }
+
+  async #updateRaw(identifier: string, input: Record<string, unknown>): Promise<IssueSnapshot> {
     const data = await this.#graphql<{ issueUpdate: { success: boolean; issue: LinearIssue } }>(
       `mutation Update($id: String!, $input: IssueUpdateInput!) {
         issueUpdate(id: $id, input: $input) {
@@ -187,7 +249,7 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
         `Linear state ${nativeStatus} resolved to ${matches.length} workflow states`,
       );
     }
-    return this.update(identifier, { stateId: matches[0]?.id } as IssueUpdateInput);
+    return this.#updateRaw(identifier, { stateId: matches[0]?.id });
   }
 
   async link(identifier: string, targetUrl: string): Promise<void> {

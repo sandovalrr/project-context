@@ -1,3 +1,4 @@
+import { ProjectContextError } from "../core/errors.ts";
 import type { GitHubProjectProvider, GitHubProviderProfile } from "../core/types.ts";
 import { requestJson, versionOf } from "./http.ts";
 import type {
@@ -102,6 +103,7 @@ export class GitHubIssuesAdapter implements IssueProviderAdapter {
   }
 
   async create(input: IssueCreateInput): Promise<IssueSnapshot> {
+    this.#assertSupportedFields(input);
     const issue = await this.#request<GitHubIssue>(this.#issuePath(), "POST", {
       title: input.title,
       ...(input.description === undefined ? {} : { body: input.description }),
@@ -112,6 +114,7 @@ export class GitHubIssuesAdapter implements IssueProviderAdapter {
   }
 
   async update(identifier: string, input: IssueUpdateInput): Promise<IssueSnapshot> {
+    this.#assertSupportedFields(input);
     const number = identifier.replace(/^#/, "");
     const issue = await this.#request<GitHubIssue>(this.#issuePath(`/${number}`), "PATCH", {
       ...(input.title === undefined ? {} : { title: input.title }),
@@ -140,5 +143,20 @@ export class GitHubIssuesAdapter implements IssueProviderAdapter {
 
   async link(identifier: string, targetUrl: string): Promise<void> {
     await this.comment(identifier, `Related issue: ${targetUrl}`);
+  }
+
+  #assertSupportedFields(input: IssueCreateInput | IssueUpdateInput): void {
+    if (input.priority !== undefined) {
+      throw new ProjectContextError(
+        "FIELD_UNSUPPORTED",
+        "GitHub Issues has no native priority field",
+      );
+    }
+    if ("issueType" in input && input.issueType !== undefined) {
+      throw new ProjectContextError(
+        "FIELD_UNSUPPORTED",
+        "GitHub Issues does not support the generic issueType field",
+      );
+    }
   }
 }

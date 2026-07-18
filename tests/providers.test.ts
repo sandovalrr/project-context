@@ -125,6 +125,33 @@ describe("Linear adapter", () => {
     expect(body.variables.input).toMatchObject({ title: "Broken build", teamId: "team-1" });
     expect(body.variables.input).not.toHaveProperty("projectId");
   });
+
+  test("resolves label names and canonical priority before creation", async () => {
+    const issue = {
+      id: "issue-2",
+      identifier: "ENG-2",
+      title: "Labeled issue",
+      description: null,
+      url: "https://linear.app/workspace/issue/ENG-2",
+      updatedAt: "2026-07-18T10:00:00Z",
+      state: { id: "state-1", name: "Backlog" },
+      labels: { nodes: [{ name: "bug" }] },
+    };
+    const { fetcher, requests } = mockFetch([
+      { data: { issueLabels: { nodes: [{ id: "label-1", name: "bug" }] } } },
+      { data: { issueCreate: { success: true, issue } } },
+    ]);
+    const adapter = new LinearIssuesAdapter(
+      linearProfile,
+      linearTarget,
+      { token: "secret" },
+      fetcher,
+    );
+
+    await adapter.create({ title: "Labeled issue", labels: ["bug"], priority: "high" });
+    const body = JSON.parse(String(requests[1]?.init?.body));
+    expect(body.variables.input).toMatchObject({ priority: 2, labelIds: ["label-1"] });
+  });
 });
 
 describe("Jira Cloud adapter", () => {

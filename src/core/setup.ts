@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { getPaths } from "./paths.ts";
 
 const PROJECTS_STARTER = `# project-context host-local project registry
-# Run "project-context init" inside a Git repository to add the first project.
+# Copy a project entry from the shipped example, then run "project-context config validate".
 version: 1
 providers: {}
 projects: {}

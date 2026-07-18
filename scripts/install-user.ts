@@ -15,11 +15,6 @@ export async function installUser(
   await mkdir(dirname(targetBinary), { recursive: true, mode: 0o700 });
   await mkdir(dirname(targetSkill), { recursive: true, mode: 0o700 });
 
-  const temporaryBinary = `${targetBinary}.${crypto.randomUUID()}.tmp`;
-  await copyFile(sourceBinary, temporaryBinary);
-  await chmod(temporaryBinary, 0o755);
-  await rename(temporaryBinary, targetBinary);
-
   try {
     const metadata = await lstat(targetSkill);
     if (
@@ -32,6 +27,11 @@ export async function installUser(
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     await symlink(sourceSkill, targetSkill, "dir");
   }
+
+  const temporaryBinary = `${targetBinary}.${crypto.randomUUID()}.tmp`;
+  await copyFile(sourceBinary, temporaryBinary);
+  await chmod(temporaryBinary, 0o755);
+  await rename(temporaryBinary, targetBinary);
 
   const previousConfig = process.env.PROJECT_CONTEXT_CONFIG_DIR;
   const previousState = process.env.PROJECT_CONTEXT_STATE_DIR;

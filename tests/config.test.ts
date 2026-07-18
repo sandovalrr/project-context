@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -90,5 +90,16 @@ describe("setupHostConfiguration", () => {
 
     expect(second.created).toHaveLength(0);
     expect(await readFile(getPaths().projectsFile, "utf8")).toContain("# keep-me");
+  });
+
+  test("host configuration fails closed when group or world readable", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "project-context-home-"));
+    temporaryDirectories.push(directory);
+    process.env.PROJECT_CONTEXT_CONFIG_DIR = join(directory, "config");
+    process.env.PROJECT_CONTEXT_STATE_DIR = join(directory, "state");
+    await setupHostConfiguration();
+    await chmod(getPaths().credentialsFile, 0o644);
+
+    await expect(loadCredentialConfig(getPaths().credentialsFile)).rejects.toThrow("mode-0600");
   });
 });
