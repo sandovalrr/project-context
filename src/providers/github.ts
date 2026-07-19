@@ -7,6 +7,8 @@ import type {
   IssueCreateInput,
   IssueListOptions,
   IssueListResult,
+  IssueOptionField,
+  IssueOptionListResult,
   IssueProviderAdapter,
   IssueSnapshot,
   IssueUpdateInput,
@@ -64,6 +66,8 @@ interface GitHubLabel {
 }
 
 type GitHubAssignableUser = GitHubUser;
+
+const githubLabelSearchMaxPages = 10;
 
 export class GitHubIssuesAdapter implements IssueProviderAdapter {
   readonly type = "github" as const;
@@ -148,6 +152,34 @@ export class GitHubIssuesAdapter implements IssueProviderAdapter {
     return allLabels.length > 100 || labels.length < 100
       ? allLabels
       : this.#collectLabels(page + 1, allLabels);
+  }
+
+  async #searchLabels(
+    query: string,
+    limit: number,
+    page = 1,
+    collected: GitHubLabel[] = [],
+  ): Promise<{ labels: GitHubLabel[]; truncated: boolean }> {
+    const parameters = new URLSearchParams({ per_page: "100", page: String(page) });
+    const labels = await this.#request<GitHubLabel[]>(
+      `/repos/${encodeURIComponent(this.#repository.owner)}/${encodeURIComponent(this.#repository.name)}/labels?${parameters}`,
+    );
+    const normalizedQuery = query.toLocaleLowerCase();
+    const matches = [
+      ...collected,
+      ...labels.filter((label) => label.name.toLocaleLowerCase().includes(normalizedQuery)),
+    ];
+    const exhausted = labels.length < 100;
+    const pageBoundReached = page >= githubLabelSearchMaxPages;
+
+    if (matches.length > limit || exhausted || pageBoundReached) {
+      return {
+        labels: matches.slice(0, limit),
+        truncated: matches.length > limit || (!exhausted && pageBoundReached),
+      };
+    }
+
+    return this.#searchLabels(query, limit, page + 1, matches);
   }
 
   async #collectAssignableUsers(
@@ -257,6 +289,25 @@ export class GitHubIssuesAdapter implements IssueProviderAdapter {
     return this.#users(query, limit);
   }
 
+  async searchOptions(
+    field: IssueOptionField,
+    query: string,
+    limit = 30,
+  ): Promise<IssueOptionListResult> {
+    if (field !== "labels") {
+      throw new ProjectContextError(
+        "ISSUE_OPTION_FIELD_UNSUPPORTED",
+        `GitHub does not expose searchable ${field} options`,
+      );
+    }
+    const result = await this.#searchLabels(query, limit);
+
+    return {
+      options: result.labels.map((label) => ({ value: label.name, label: label.name })),
+      truncated: result.truncated,
+    };
+  }
+
   async capabilities(): Promise<ProviderIssueCapabilities> {
     const labels = await this.#collectLabels();
 
@@ -270,6 +321,7 @@ export class GitHubIssuesAdapter implements IssueProviderAdapter {
             label: label.name,
           })),
           optionsTruncated: labels.length > 100,
+          discoveryTool: "search_issue_options",
         }),
         issueFieldCapability("assignee", ["create", "update"], {
           clearable: true,

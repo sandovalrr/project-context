@@ -11,6 +11,8 @@
 - User discovery returns active members of the configured team and uses the
   Linear user ID as `assignee`.
 - Capabilities return team labels and Linear's canonical numeric priorities.
+- Option search uses team-filtered label queries and the fixed Linear priority
+  catalog. Generic issue types remain unsupported.
 - Canonical states require explicit project mappings.
 - Issue URLs are added through comments when a native relation is unavailable.
 
@@ -24,6 +26,8 @@
   the GitHub login as `assignee`.
 - Capabilities return repository labels and explicitly mark priority and generic
   issue type as unsupported.
+- Option search scans only repository labels, stops after ten 100-label pages,
+  and reports truncation when the bound prevents a complete answer.
 - Native states are `open` and `closed`; `in_progress` requires configured
   labels.
 - No pull-request, release, or repository-administration operations are exposed.
@@ -39,6 +43,9 @@
   account ID as `assignee`.
 - Capabilities return project issue types and project-available priorities;
   labels accept custom values.
+- Option search uses only project-available priorities and creatable issue
+  types. Jira label discovery is intentionally unsupported because Jira exposes
+  a site-global label catalog rather than a project-scoped catalog.
 - Canonical state mappings resolve to one uniquely named available transition.
 - Jira Server and Data Center are unsupported.
 
@@ -75,3 +82,11 @@ are returned, but template contents are not. Agents must not infer support from
 an empty option list: `operations`, `acceptsCustomValues`, `defaultValue`, and
 `discoveryTool` are authoritative. Inline option catalogs are bounded to 100;
 `optionsTruncated: true` means callers must not treat the catalog as complete.
+
+`search_issue_options` narrows reusable `labels`, `priority`, or `issueType`
+values inside the configured provider target. Returned values are opaque and
+must be passed unchanged. Results are bounded to 100 and include `truncated`;
+an incomplete result is never evidence that an option is invalid. Providers
+return `ISSUE_OPTION_FIELD_UNSUPPORTED` when a field has no safe searchable
+catalog. Capability `discoveryTool: search_issue_options` identifies fields
+that support this operation.

@@ -231,6 +231,7 @@ describe("GitHub Issues adapter", () => {
           field: "labels",
           operations: ["create", "update"],
           acceptsCustomValues: false,
+          discoveryTool: "search_issue_options",
           optionsTruncated: false,
           options: [
             { value: "bug", label: "bug" },
@@ -250,6 +251,60 @@ describe("GitHub Issues adapter", () => {
     expect(decodeURIComponent(requests[0]?.url ?? "")).toBe(
       "https://api.github.com/repos/acme/payments/labels?per_page=100&page=1",
     );
+  });
+
+  test("searches repository labels with bounded pagination", async () => {
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({
+      id: index,
+      name: `label-${index}`,
+    }));
+    const { fetcher, requests } = mockFetch([
+      firstPage,
+      [
+        { id: 101, name: "security" },
+        { id: 102, name: "security-review" },
+      ],
+    ]);
+    const adapter = new GitHubIssuesAdapter(
+      githubProfile,
+      githubTarget,
+      { token: "secret" },
+      fetcher,
+      { owner: "acme", name: "payments" },
+    );
+
+    expect(await adapter.searchOptions("labels", "SECURITY", 1)).toEqual({
+      options: [{ value: "security", label: "security" }],
+      truncated: true,
+    });
+    expect(requests.map(({ url }) => decodeURIComponent(url))).toEqual([
+      "https://api.github.com/repos/acme/payments/labels?per_page=100&page=1",
+      "https://api.github.com/repos/acme/payments/labels?per_page=100&page=2",
+    ]);
+    await expect(adapter.searchOptions("priority", "high", 10)).rejects.toMatchObject({
+      code: "ISSUE_OPTION_FIELD_UNSUPPORTED",
+    });
+  });
+
+  test("marks repository label search incomplete at the page bound", async () => {
+    const page = Array.from({ length: 100 }, (_, index) => ({
+      id: index,
+      name: `label-${index}`,
+    }));
+    const { fetcher, requests } = mockFetch(Array.from({ length: 10 }, () => page));
+    const adapter = new GitHubIssuesAdapter(
+      githubProfile,
+      githubTarget,
+      { token: "secret" },
+      fetcher,
+      { owner: "acme", name: "payments" },
+    );
+
+    expect(await adapter.searchOptions("labels", "absent", 10)).toEqual({
+      options: [],
+      truncated: true,
+    });
+    expect(requests).toHaveLength(10);
   });
 });
 
@@ -521,6 +576,7 @@ describe("Linear adapter", () => {
 
     expect(result.fields.find(({ field }) => field === "labels")).toMatchObject({
       acceptsCustomValues: false,
+      discoveryTool: "search_issue_options",
       optionsTruncated: true,
       options: [
         { value: "Bug", label: "Bug" },
@@ -535,9 +591,46 @@ describe("Linear adapter", () => {
       { value: 4, label: "Low" },
     ]);
     expect(result.fields.find(({ field }) => field === "priority")?.defaultValue).toBe(0);
+    expect(result.fields.find(({ field }) => field === "priority")?.discoveryTool).toBe(
+      "search_issue_options",
+    );
     expect(result.fields.find(({ field }) => field === "issueType")?.operations).toEqual([]);
     const body = JSON.parse(String(requests[0]?.init?.body));
     expect(body.variables).toEqual({ teamId: "team-1", first: 101 });
+  });
+
+  test("searches team labels and the fixed Linear priority catalog", async () => {
+    const { fetcher, requests } = mockFetch([
+      {
+        data: {
+          issueLabels: {
+            nodes: [{ id: "label-1", name: "Bug" }],
+            pageInfo: { hasNextPage: true },
+          },
+        },
+      },
+    ]);
+    const adapter = new LinearIssuesAdapter(
+      linearProfile,
+      linearTarget,
+      { token: "secret" },
+      fetcher,
+    );
+
+    expect(await adapter.searchOptions("labels", "bug", 1)).toEqual({
+      options: [{ value: "Bug", label: "Bug" }],
+      truncated: true,
+    });
+    expect(await adapter.searchOptions("priority", "hi", 10)).toEqual({
+      options: [{ value: 2, label: "High" }],
+      truncated: false,
+    });
+    const body = JSON.parse(String(requests[0]?.init?.body));
+    expect(body.variables).toEqual({ teamId: "team-1", query: "bug", first: 2 });
+    expect(body.query).toContain("name: { containsIgnoreCase: $query }");
+    await expect(adapter.searchOptions("issueType", "bug", 10)).rejects.toMatchObject({
+      code: "ISSUE_OPTION_FIELD_UNSUPPORTED",
+    });
   });
 });
 
@@ -767,6 +860,7 @@ describe("Jira Cloud adapter", () => {
     ]);
     expect(result.fields.find(({ field }) => field === "issueType")).toMatchObject({
       defaultValue: "Task",
+      discoveryTool: "search_issue_options",
       optionsTruncated: false,
       options: [
         { value: "Bug", label: "Bug" },
@@ -777,6 +871,48 @@ describe("Jira Cloud adapter", () => {
       "https://example.atlassian.net/rest/api/3/issue/createmeta/10000/issuetypes?maxResults=100&startAt=0",
       "https://example.atlassian.net/rest/api/3/priority/search?projectId=10000&maxResults=100&startAt=0",
     ]);
+  });
+
+  test("searches only project-available priorities and creatable issue types", async () => {
+    const { fetcher, requests } = mockFetch([
+      {
+        values: [
+          { id: "1", name: "Highest" },
+          { id: "2", name: "High" },
+        ],
+        isLast: true,
+      },
+      {
+        issueTypes: [
+          { id: "10001", name: "Bug", subtask: false },
+          { id: "10002", name: "Task", subtask: false },
+          { id: "10003", name: "Sub-task", subtask: true },
+        ],
+        total: 3,
+      },
+    ]);
+    const adapter = new JiraCloudIssuesAdapter(
+      jiraProfile,
+      jiraTarget,
+      { email: "r@example.com", token: "secret" },
+      fetcher,
+    );
+
+    expect(await adapter.searchOptions("priority", "high", 1)).toEqual({
+      options: [{ value: "Highest", label: "Highest" }],
+      truncated: true,
+    });
+    expect(await adapter.searchOptions("issueType", "task", 10)).toEqual({
+      options: [{ value: "Task", label: "Task" }],
+      truncated: false,
+    });
+    expect(requests.map(({ url }) => decodeURIComponent(url))).toEqual([
+      "https://example.atlassian.net/rest/api/3/priority/search?projectId=10000&maxResults=100&startAt=0",
+      "https://example.atlassian.net/rest/api/3/issue/createmeta/10000/issuetypes?maxResults=100&startAt=0",
+    ]);
+    await expect(adapter.searchOptions("labels", "bug", 10)).rejects.toMatchObject({
+      code: "ISSUE_OPTION_FIELD_UNSUPPORTED",
+    });
   });
 });
 

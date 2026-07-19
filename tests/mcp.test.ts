@@ -32,6 +32,7 @@ describe("provider-neutral MCP server", () => {
       "list_users",
       "prepare_issue_change",
       "resolve_project_context",
+      "search_issue_options",
       "search_issues",
       "search_users",
     ]);
@@ -120,6 +121,16 @@ describe("provider-neutral MCP server", () => {
       properties: { all: { type: "boolean" }, provider: { type: "string" } },
     });
     expect(capabilitiesTool?.annotations?.readOnlyHint).toBe(true);
+    const searchOptionsTool = tools.tools.find((tool) => tool.name === "search_issue_options");
+    expect(searchOptionsTool?.description).toContain("labels, priorities, or issue types");
+    expect(searchOptionsTool?.inputSchema).toMatchObject({
+      properties: {
+        field: { enum: ["labels", "priority", "issueType"] },
+        query: { type: "string", minLength: 1 },
+        limit: { type: "integer", minimum: 1, maximum: 100 },
+      },
+    });
+    expect(searchOptionsTool?.annotations?.readOnlyHint).toBe(true);
     expect(
       tools.tools.find((tool) => tool.name === "apply_issue_change")?.annotations?.destructiveHint,
     ).toBe(true);

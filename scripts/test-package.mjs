@@ -57,6 +57,7 @@ try {
     "list_users",
     "prepare_issue_change",
     "resolve_project_context",
+    "search_issue_options",
     "search_issues",
     "search_users",
   ];

@@ -11,6 +11,7 @@ import {
   listIssues,
   listUsers,
   prepareIssueOperation,
+  searchIssueOptions,
   searchIssues,
   searchUsers,
 } from "./core/operations.ts";
@@ -38,6 +39,7 @@ const issueOptionSchema = z.object({
   value: z.union([z.string(), z.number()]),
   label: z.string(),
 });
+const issueOptionFieldSchema = z.enum(["labels", "priority", "issueType"]);
 const issueSchema = z.object({
   provider: providerTypeSchema,
   id: z.string(),
@@ -94,6 +96,15 @@ const userListResultSchema = z.array(
     truncated: z.boolean(),
   }),
 );
+const issueOptionSearchResultSchema = z.array(
+  z.object({
+    providerAlias: z.string(),
+    providerType: providerTypeSchema,
+    field: issueOptionFieldSchema,
+    options: z.array(issueOptionSchema),
+    truncated: z.boolean(),
+  }),
+);
 const getResultSchema = z.object({ providerAlias: z.string(), issue: issueSchema });
 const issueFieldNameSchema = z.enum([
   "title",
@@ -117,7 +128,7 @@ const capabilitiesResultSchema = z.array(
         options: z.array(issueOptionSchema),
         optionsTruncated: z.boolean(),
         defaultValue: z.union([z.string(), z.number()]).nullable(),
-        discoveryTool: z.literal("search_users").nullable(),
+        discoveryTool: z.enum(["search_users", "search_issue_options"]).nullable(),
       }),
     ),
     canonicalStatuses: z.array(canonicalStatusSchema),
@@ -242,7 +253,7 @@ export function createProjectIssuesServer(): McpServer {
     { name: SERVER_NAME, version: PACKAGE_VERSION },
     {
       instructions:
-        "Resolve repository context before issue work. Use list_issues for canonical status filters and search_issues only for title or description text. Use get_issue_capabilities before creating or when exact field options are unknown. Use list_users or search_users to obtain an exact assignee value before assigning; ask the user to choose when matches are ambiguous. Reads are provider-routed. External writes require prepare_issue_change followed by apply_issue_change using the returned short-lived token.",
+        "Resolve repository context before issue work. Use list_issues for canonical status filters and search_issues only for title or description text. Use get_issue_capabilities before creating or when exact field options are unknown, and search_issue_options when a capability points to it or its catalog is truncated. Use list_users or search_users to obtain an exact assignee value before assigning; ask the user to choose when matches are ambiguous. Reads are provider-routed. External writes require prepare_issue_change followed by apply_issue_change using the returned short-lived token.",
     },
   );
 
@@ -379,6 +390,37 @@ export function createProjectIssuesServer(): McpServer {
     ({ query, cwd, provider, all, limit }) =>
       safely(async () =>
         searchUsers(query, {
+          cwd: await resolveMcpWorkingDirectory(server, cwd),
+          ...(provider ? { provider } : {}),
+          ...(all === undefined ? {} : { all }),
+          ...(limit === undefined ? {} : { limit }),
+        }),
+      ),
+  );
+
+  server.registerTool(
+    "search_issue_options",
+    {
+      title: "Search issue options",
+      description:
+        "Search target-scoped labels, priorities, or issue types. Pass returned option values unchanged and treat truncated results as incomplete.",
+      inputSchema: {
+        field: issueOptionFieldSchema,
+        query: z.string().min(1),
+        cwd: cwdSchema,
+        provider: providerSchema,
+        all: z
+          .boolean()
+          .optional()
+          .describe("Search all configured providers only when explicitly true"),
+        limit: z.number().int().min(1).max(100).optional(),
+      },
+      outputSchema: resultSchema(issueOptionSearchResultSchema),
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    },
+    ({ field, query, cwd, provider, all, limit }) =>
+      safely(async () =>
+        searchIssueOptions(field, query, {
           cwd: await resolveMcpWorkingDirectory(server, cwd),
           ...(provider ? { provider } : {}),
           ...(all === undefined ? {} : { all }),
