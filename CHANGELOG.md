@@ -1,3 +1,14 @@
+# [0.2.0](https://github.com/sandovalrr/project-context/compare/v0.1.2...v0.2.0) (2026-07-19)
+
+
+### Features
+
+* add target-scoped issue comment reads ([#25](https://github.com/sandovalrr/project-context/issues/25)) ([dda96a5](https://github.com/sandovalrr/project-context/commit/dda96a5f72aaaf38f8194ff075a26179bbffb2df))
+* **issues:** add assignable user discovery ([#19](https://github.com/sandovalrr/project-context/issues/19)) ([7c56d15](https://github.com/sandovalrr/project-context/commit/7c56d15fc8bcadea421d16f706d1af552e16e51e))
+* **issues:** add canonical status listing ([#17](https://github.com/sandovalrr/project-context/issues/17)) ([86f4fd2](https://github.com/sandovalrr/project-context/commit/86f4fd29f185ab59131336be1bcc973ba358fb0e))
+* **issues:** add option search ([#24](https://github.com/sandovalrr/project-context/issues/24)) ([b41a8bb](https://github.com/sandovalrr/project-context/commit/b41a8bb8b5da9172364dbe35fa4fd47eb85f8df4))
+* **issues:** expose issue capabilities ([#21](https://github.com/sandovalrr/project-context/issues/21)) ([b244a72](https://github.com/sandovalrr/project-context/commit/b244a72e621b1bae60e0f7dede6054f8e5949d2d))
+
 ## [0.1.2](https://github.com/sandovalrr/project-context/compare/v0.1.1...v0.1.2) (2026-07-19)
 
 
