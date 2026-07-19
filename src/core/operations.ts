@@ -33,6 +33,7 @@ import {
 } from "./pending.ts";
 import { resolveRepository } from "./repository.ts";
 import { routeIssueProvider } from "./routing.ts";
+import { classifyCanonicalStatus, resolveStatusFilters } from "./status.ts";
 import type { CanonicalStatus, ProjectProvider, ProviderProfile } from "./types.ts";
 
 interface OperationRuntime {
@@ -472,6 +473,97 @@ export async function searchIssues(
     });
   }
   return results;
+}
+
+export interface ListedIssue extends IssueSnapshot {
+  canonicalStatus: CanonicalStatus | null;
+}
+
+export interface IssueListGroup {
+  providerAlias: string;
+  issues: ListedIssue[];
+  truncated: boolean;
+}
+
+async function listFromRuntime(
+  current: OperationRuntime,
+  statuses: CanonicalStatus[] | undefined,
+  limit: number | undefined,
+): Promise<IssueListGroup> {
+  const filters = statuses ? resolveStatusFilters(current.provider, statuses) : undefined;
+  const result = await current.adapter.list({
+    ...(filters ? { matches: filters.map((filter) => filter.match) } : {}),
+    ...(limit === undefined ? {} : { limit }),
+  });
+  const issues = result.issues.flatMap((issue) => {
+    const canonicalStatus = classifyCanonicalStatus(current.provider, issue);
+    const included =
+      statuses === undefined || (canonicalStatus && statuses.includes(canonicalStatus));
+
+    return included ? [{ ...issue, canonicalStatus }] : [];
+  });
+
+  return {
+    providerAlias: current.providerAlias,
+    issues,
+    truncated: result.truncated || issues.length !== result.issues.length,
+  };
+}
+
+export async function listIssues(
+  options: {
+    cwd?: string;
+    provider?: string;
+    all?: boolean;
+    statuses?: CanonicalStatus[];
+    limit?: number;
+    fetcher?: typeof fetch;
+  } = {},
+): Promise<IssueListGroup[]> {
+  if (options.all && options.provider) {
+    throw new ProjectContextError("ROUTING_CONFLICT", "Use either --provider or --all, not both");
+  }
+  if (options.statuses?.length === 0) {
+    throw new ProjectContextError(
+      "STATUS_FILTER_EMPTY",
+      "Canonical status filters must contain at least one status",
+    );
+  }
+  if (
+    options.limit !== undefined &&
+    (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > 100)
+  ) {
+    throw new ProjectContextError("LIMIT_INVALID", "Issue list limit must be between 1 and 100");
+  }
+
+  const cwd = options.cwd ?? process.cwd();
+  const runtimeOptions = {
+    ...(options.provider ? { explicitProvider: options.provider } : {}),
+    ...(options.fetcher ? { fetcher: options.fetcher } : {}),
+  };
+  if (!options.all) {
+    return [
+      await listFromRuntime(await runtime(cwd, runtimeOptions), options.statuses, options.limit),
+    ];
+  }
+
+  const paths = getPaths();
+  const projects = await loadProjectsConfig(paths.projectsFile);
+  const repository = await resolveRepository(projects, cwd);
+  const aliases = Object.keys(repository.project.issues.providers);
+
+  return Promise.all(
+    aliases.map(async (alias) =>
+      listFromRuntime(
+        await runtime(cwd, {
+          explicitProvider: alias,
+          ...(options.fetcher ? { fetcher: options.fetcher } : {}),
+        }),
+        options.statuses,
+        options.limit,
+      ),
+    ),
+  );
 }
 
 export async function getIssue(

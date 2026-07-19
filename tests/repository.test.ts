@@ -42,7 +42,7 @@ describe("resolveRepository", () => {
     ]);
 
     const config = {
-      version: 1,
+      version: 2,
       providers: {},
       projects: {
         "github.com/acme/payments": {
@@ -81,7 +81,7 @@ describe("resolveRepository", () => {
       "git@github.com:acme/unknown.git",
     ]);
 
-    const config = { version: 1, providers: {}, projects: {} } as ProjectsConfig;
+    const config = { version: 2, providers: {}, projects: {} } as ProjectsConfig;
     await expect(resolveRepository(config, directory)).rejects.toThrow("is not configured");
   });
 
@@ -90,7 +90,7 @@ describe("resolveRepository", () => {
     temporaryDirectories.push(directory);
     Bun.spawnSync(["git", "init", "-q", directory]);
     const config = {
-      version: 1,
+      version: 2,
       providers: {},
       projects: {
         "github.com/example/local-only": {

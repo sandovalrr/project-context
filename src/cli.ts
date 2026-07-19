@@ -21,6 +21,7 @@ import { migrateHostConfiguration } from "./core/migrations.ts";
 import {
   applyIssueOperation,
   getIssue,
+  listIssues,
   prepareIssueOperation,
   searchIssues,
 } from "./core/operations.ts";
@@ -29,6 +30,8 @@ import type { IssueOperationRequest } from "./core/pending.ts";
 import { promptHidden } from "./core/prompt.ts";
 import { guidedSetup, setupHostConfiguration } from "./core/setup.ts";
 import { installProjectIssuesSkill, projectIssuesSkillStatus } from "./core/skill.ts";
+import { statusFilterWarnings } from "./core/status.ts";
+import { CANONICAL_STATUSES, type CanonicalStatus } from "./core/types.ts";
 import { startProjectIssuesStdioServer } from "./mcp.ts";
 import { PACKAGE_VERSION } from "./metadata.ts";
 
@@ -80,6 +83,25 @@ async function doctor(cwd: string) {
     checks.push({ check: "configuration", status: "ok", detail: JSON.stringify(result) });
   } catch (error) {
     checks.push({ check: "configuration", status: "error", detail: errorMessage(error) });
+  }
+
+  try {
+    const projects = await loadProjectsConfig(paths.projectsFile);
+    const statusChecks = Object.entries(projects.projects).flatMap(([repositoryId, project]) =>
+      Object.entries(project.issues.providers).map(([providerAlias, provider]) => {
+        const warnings = statusFilterWarnings(provider);
+
+        return {
+          check: `status-filter:${repositoryId}:${providerAlias}`,
+          status: warnings.length === 0 ? ("ok" as const) : ("warning" as const),
+          detail:
+            warnings.length === 0 ? "all canonical statuses are listable" : warnings.join("; "),
+        };
+      }),
+    );
+    checks.push(...statusChecks);
+  } catch {
+    // The configuration check above already reports the actionable parse or schema error.
   }
 
   for (const path of [
@@ -342,9 +364,52 @@ const cli = yargs(hideBin(process.argv))
       .demandCommand(1, "Choose add or test")
       .strictCommands(),
   )
-  .command("issue", "Search, read, preview, and apply issue operations", (issue) =>
+  .command("issue", "List, search, read, preview, and apply issue operations", (issue) =>
     issue
       .option("provider", { type: "string", description: "Explicit configured provider alias" })
+      .command(
+        "list",
+        "List issues by canonical status in the default, selected, or all configured providers",
+        (command) =>
+          command
+            .option("status", {
+              type: "string",
+              array: true,
+              choices: CANONICAL_STATUSES,
+              description: "Canonical status; repeat for multiple statuses",
+            })
+            .option("all", {
+              type: "boolean",
+              default: false,
+              description: "List from all configured providers",
+            })
+            .option("limit", {
+              type: "number",
+              default: 30,
+              description: "Maximum results per provider",
+            })
+            .conflicts("all", "provider")
+            .check((argv) => {
+              if (!Number.isInteger(argv.limit) || argv.limit < 1 || argv.limit > 100) {
+                throw new Error("--limit must be an integer between 1 and 100");
+              }
+              if (argv.status && new Set(argv.status).size !== argv.status.length) {
+                throw new Error("--status values must be unique");
+              }
+              return true;
+            }),
+        async (argv) =>
+          print(
+            await listIssues({
+              cwd: argv.cwd ?? process.cwd(),
+              ...(argv.provider ? { provider: argv.provider } : {}),
+              all: argv.all,
+              ...(argv.status ? { statuses: argv.status as CanonicalStatus[] } : {}),
+              limit: argv.limit,
+            }),
+            argv,
+          ),
+      )
       .command(
         "search <query>",
         "Search issues in the default, selected, or all configured providers",

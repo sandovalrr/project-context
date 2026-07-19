@@ -62,15 +62,17 @@ project-context --help
 project-context setup --guided
 project-context config validate
 project-context resolve --cwd /path/to/repository
+project-context issue list --status open --status in_progress
 project-context doctor
 project-context audit list
 project-context skill status
 project-context integration manifest --client codex
 ```
 
-The stdio server exposes five tools:
+The stdio server exposes six tools:
 
 - `resolve_project_context`
+- `list_issues`
 - `search_issues`
 - `get_issue`
 - `prepare_issue_change`

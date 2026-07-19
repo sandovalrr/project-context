@@ -7,10 +7,12 @@ import { resolveMcpWorkingDirectory } from "./core/mcp-working-directory.ts";
 import {
   applyIssueOperation,
   getIssue,
+  listIssues,
   prepareIssueOperation,
   searchIssues,
 } from "./core/operations.ts";
 import type { IssueOperationRequest } from "./core/pending.ts";
+import { CANONICAL_STATUSES } from "./core/types.ts";
 import { PACKAGE_VERSION, SERVER_NAME, setupCommand } from "./metadata.ts";
 
 const providerTypeSchema = z.enum(["linear", "github", "jira-cloud"]);
@@ -48,6 +50,14 @@ const resolveResultSchema = z.object({
 });
 const searchResultSchema = z.array(
   z.object({ providerAlias: z.string(), issues: z.array(issueSchema) }),
+);
+const canonicalStatusSchema = z.enum(CANONICAL_STATUSES);
+const listResultSchema = z.array(
+  z.object({
+    providerAlias: z.string(),
+    issues: z.array(issueSchema.extend({ canonicalStatus: canonicalStatusSchema.nullable() })),
+    truncated: z.boolean(),
+  }),
 );
 const getResultSchema = z.object({ providerAlias: z.string(), issue: issueSchema });
 const prepareResultSchema = z.object({
@@ -158,7 +168,7 @@ export function createProjectIssuesServer(): McpServer {
     { name: SERVER_NAME, version: PACKAGE_VERSION },
     {
       instructions:
-        "Resolve repository context before issue work. Reads are provider-routed. External writes require prepare_issue_change followed by apply_issue_change using the returned short-lived token.",
+        "Resolve repository context before issue work. Use list_issues for canonical status filters and search_issues only for title or description text. Reads are provider-routed. External writes require prepare_issue_change followed by apply_issue_change using the returned short-lived token.",
     },
   );
 
@@ -173,6 +183,42 @@ export function createProjectIssuesServer(): McpServer {
     },
     ({ cwd }) =>
       safely(async () => resolveProjectContext(await resolveMcpWorkingDirectory(server, cwd))),
+  );
+
+  server.registerTool(
+    "list_issues",
+    {
+      title: "List issues",
+      description:
+        "List issues ordered by most recently updated, optionally filtered by canonical status in the default, selected, or all configured providers.",
+      inputSchema: {
+        statuses: z
+          .array(canonicalStatusSchema)
+          .min(1)
+          .max(CANONICAL_STATUSES.length)
+          .optional()
+          .describe("Unique canonical statuses; omission lists all statuses"),
+        cwd: cwdSchema,
+        provider: providerSchema,
+        all: z
+          .boolean()
+          .optional()
+          .describe("List from all configured providers only when explicitly true"),
+        limit: z.number().int().min(1).max(100).optional(),
+      },
+      outputSchema: resultSchema(listResultSchema),
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    },
+    ({ statuses, cwd, provider, all, limit }) =>
+      safely(async () =>
+        listIssues({
+          cwd: await resolveMcpWorkingDirectory(server, cwd),
+          ...(statuses ? { statuses } : {}),
+          ...(provider ? { provider } : {}),
+          ...(all === undefined ? {} : { all }),
+          ...(limit === undefined ? {} : { limit }),
+        }),
+      ),
   );
 
   server.registerTool(

@@ -21,11 +21,12 @@ rejected. `project-context config migrate` previews an available migration;
 `--apply` is required for atomic replacement and timestamped backup. Startup
 never migrates configuration.
 
-The initial migration path treats an otherwise valid unversioned registry (or
-one declaring `version: 0`) as version 0 and adds `version: 1`. Preview reports
-both affected files without writing. Apply reacquires the configuration lock,
-re-reads and validates both registries, backs them up, and replaces each file
-through a mode-`0600` temporary file.
+The current project registry schema is version 2; the credential registry
+remains version 1. Migration upgrades an unversioned or version-1 project
+registry to version 2 and an unversioned credential registry to version 1.
+Preview reports affected files without writing. Apply reacquires the
+configuration lock, re-reads and validates both registries, backs them up, and
+replaces each file through a mode-`0600` temporary file.
 
 ## Project registry
 
@@ -34,7 +35,7 @@ Provider IDs are authoritative; names are display metadata. A sanitized,
 complete starting point is in `examples/projects.example.yaml`.
 
 ```yaml
-version: 1
+version: 2
 
 providers:
   github-example:
@@ -59,12 +60,32 @@ projects:
             repository: inherit
           mappings:
             status:
-              open: open
+              open:
+                state: open
+                match:
+                  state: open
+                  labels_none: [in-progress, canceled]
               in_progress:
                 state: open
                 add_labels: [in-progress]
-              done: closed
-              canceled: closed
+                remove_labels: [canceled]
+                match:
+                  state: open
+                  labels_all: [in-progress]
+                  labels_none: [canceled]
+              done:
+                state: closed
+                remove_labels: [in-progress, canceled]
+                match:
+                  state: closed
+                  labels_none: [canceled]
+              canceled:
+                state: closed
+                add_labels: [canceled]
+                remove_labels: [in-progress]
+                match:
+                  state: closed
+                  labels_all: [canceled]
 ```
 
 Linear requires a team and an explicit project object or `none`. Jira Cloud
@@ -74,7 +95,15 @@ route to any supported issue provider.
 
 Run `project-context config validate` after every edit. Run
 `project-context doctor --cwd /path/to/repository` to also verify permissions,
-routing, and the active account.
+routing, the active account, and whether canonical statuses are unambiguously
+listable.
+
+Status strings derive a read predicate that matches the same provider-native
+state. Object mappings without `match` derive `state`, `labels_all` from
+`add_labels`, and `labels_none` from `remove_labels`. Add an explicit `match`
+when those derived predicates overlap. Listing fails closed with
+`STATUS_MAPPING_MISSING` or `STATUS_FILTER_AMBIGUOUS` rather than weakening a
+requested canonical filter.
 
 ## Credential registry
 

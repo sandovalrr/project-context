@@ -9,7 +9,7 @@ interface RegistryMigration {
   path: string;
   kind: "projects" | "credentials";
   fromVersion: number;
-  toVersion: 1;
+  toVersion: number;
   value: Record<string, unknown>;
 }
 
@@ -21,7 +21,7 @@ interface RegistryBackup {
 export interface ConfigurationMigrationResult {
   needed: boolean;
   applied: boolean;
-  files: Array<{ path: string; from_version: number; to_version: 1 }>;
+  files: Array<{ path: string; from_version: number; to_version: number }>;
   backups?: string[];
 }
 
@@ -57,11 +57,21 @@ async function secureYaml(path: string): Promise<Record<string, unknown>> {
   return value as Record<string, unknown>;
 }
 
-function migratedValue(path: string, value: Record<string, unknown>): Record<string, unknown> {
+function targetVersion(kind: RegistryMigration["kind"]): number {
+  return kind === "projects" ? 2 : 1;
+}
+
+function migratedValue(
+  path: string,
+  kind: RegistryMigration["kind"],
+  value: Record<string, unknown>,
+): Record<string, unknown> {
   const version = value.version ?? 0;
-  if (version === 1) return value;
-  if (version === 0) return { ...value, version: 1 };
-  if (typeof version === "number" && version > 1) {
+  const target = targetVersion(kind);
+  const supportedSource = kind === "projects" ? version === 0 || version === 1 : version === 0;
+  if (version === target) return value;
+  if (supportedSource) return { ...value, version: target };
+  if (typeof version === "number" && version > target) {
     throw new ProjectContextError(
       "CONFIG_VERSION_NEWER",
       `${path} uses unsupported future schema version ${version}`,
@@ -79,10 +89,11 @@ async function migration(
 ): Promise<RegistryMigration> {
   const value = await secureYaml(path);
   const version = value.version ?? 0;
-  const migrated = migratedValue(path, value);
+  const migrated = migratedValue(path, kind, value);
+  const toVersion = targetVersion(kind);
   if (kind === "projects") validateProjectsConfigValue(migrated, path);
   else validateCredentialConfigValue(migrated, path);
-  return { path, kind, fromVersion: Number(version), toVersion: 1, value: migrated };
+  return { path, kind, fromVersion: Number(version), toVersion, value: migrated };
 }
 
 function publicFiles(migrations: RegistryMigration[]) {

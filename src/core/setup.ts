@@ -16,7 +16,7 @@ interface GuidedSetupAnswers {
 
 const PROJECTS_STARTER = `# project-context host-local project registry
 # Copy a project entry from the shipped example, then run "project-context config validate".
-version: 1
+version: 2
 providers: {}
 projects: {}
 `;

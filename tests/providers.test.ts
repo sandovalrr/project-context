@@ -104,6 +104,42 @@ describe("GitHub Issues adapter", () => {
       body: "Details",
     });
   });
+
+  test("lists matching statuses in updated order and reports truncation", async () => {
+    const issue = {
+      id: 20,
+      number: 12,
+      title: "Active work",
+      body: "Details",
+      state: "open",
+      labels: [{ name: "in-progress" }],
+      html_url: "https://github.com/acme/payments/issues/12",
+      updated_at: "2026-07-18T10:00:00Z",
+    };
+    const { fetcher, requests } = mockFetch([{ total_count: 2, items: [issue] }]);
+    const adapter = new GitHubIssuesAdapter(
+      githubProfile,
+      githubTarget,
+      { token: "secret" },
+      fetcher,
+      { owner: "acme", name: "payments" },
+    );
+
+    const result = await adapter.list({
+      matches: [{ state: "open", labelsAll: ["in-progress"], labelsNone: ["paused"] }],
+      limit: 1,
+    });
+
+    expect(result).toMatchObject({ truncated: true, issues: [{ identifier: "#12" }] });
+    const query = decodeURIComponent(requests[0]?.url ?? "");
+    expect(query).toContain("repo:acme/payments");
+    expect(query).toContain("is:issue");
+    expect(query).toContain("is:open");
+    expect(query).toContain('label:"in-progress"');
+    expect(query).toContain('-label:"paused"');
+    expect(query).toContain("sort=updated");
+    expect(query).toContain("order=desc");
+  });
 });
 
 describe("Linear adapter", () => {
@@ -204,6 +240,40 @@ describe("Linear adapter", () => {
         ],
       },
     });
+  });
+
+  test("lists status matches inside the configured target in updated order", async () => {
+    const issue = {
+      ...linearIssue("team-1"),
+      state: { id: "state-2", name: "In Progress" },
+      labels: { nodes: [{ name: "doing" }] },
+    };
+    const { fetcher, requests } = mockFetch([
+      { data: { issues: { nodes: [issue], pageInfo: { hasNextPage: true } } } },
+    ]);
+    const adapter = new LinearIssuesAdapter(
+      linearProfile,
+      linearTarget,
+      { token: "secret" },
+      fetcher,
+    );
+
+    const result = await adapter.list({
+      matches: [{ state: "In Progress", labelsAll: ["doing"], labelsNone: ["paused"] }],
+      limit: 1,
+    });
+
+    expect(result).toMatchObject({ truncated: true, issues: [{ identifier: "ENG-1" }] });
+    const body = JSON.parse(String(requests[0]?.init?.body));
+    expect(body.query).toContain("orderBy: updatedAt");
+    expect(body.query).toContain("pageInfo { hasNextPage }");
+    expect(body.variables.filter).toMatchObject({
+      team: { id: { eq: "team-1" } },
+      project: { null: true },
+    });
+    expect(JSON.stringify(body.variables.filter)).toContain("In Progress");
+    expect(JSON.stringify(body.variables.filter)).toContain("doing");
+    expect(JSON.stringify(body.variables.filter)).toContain("paused");
   });
 
   test("uses the configured team and explicit no-project target", async () => {
@@ -329,6 +399,42 @@ describe("Jira Cloud adapter", () => {
     expect((await adapter.search("targeted", 1))[0]?.identifier).toBe("OPS-4");
     const body = JSON.parse(String(requests[0]?.init?.body));
     expect(body.jql).toContain('project = "10000"');
+    expect(body.fields).toContain("project");
+  });
+
+  test("lists matching statuses with constrained JQL and truncation metadata", async () => {
+    const issue = {
+      id: "10001",
+      key: "OPS-4",
+      self: "https://example.atlassian.net/rest/api/3/issue/10001",
+      fields: {
+        summary: "Active work",
+        status: { name: "In Progress" },
+        project: { id: "10000" },
+        labels: ["doing"],
+        updated: "2026-07-18T10:00:00.000+0000",
+      },
+    };
+    const { fetcher, requests } = mockFetch([{ issues: [issue], isLast: false }]);
+    const adapter = new JiraCloudIssuesAdapter(
+      jiraProfile,
+      jiraTarget,
+      { email: "r@example.com", token: "secret" },
+      fetcher,
+    );
+
+    const result = await adapter.list({
+      matches: [{ state: "In Progress", labelsAll: ["doing"], labelsNone: ["paused"] }],
+      limit: 1,
+    });
+
+    expect(result).toMatchObject({ truncated: true, issues: [{ identifier: "OPS-4" }] });
+    const body = JSON.parse(String(requests[0]?.init?.body));
+    expect(body.jql).toContain('project = "10000"');
+    expect(body.jql).toContain('status = "In Progress"');
+    expect(body.jql).toContain('labels = "doing"');
+    expect(body.jql).toContain('labels != "paused" OR labels is EMPTY');
+    expect(body.jql).toContain("ORDER BY updated DESC");
     expect(body.fields).toContain("project");
   });
 

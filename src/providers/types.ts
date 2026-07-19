@@ -1,4 +1,4 @@
-import type { ProviderType } from "../core/types.ts";
+import type { ProviderType, StatusMatch } from "../core/types.ts";
 
 export interface ProviderIdentity {
   provider: ProviderType;
@@ -38,9 +38,20 @@ export interface IssueUpdateInput {
   priority?: string | number;
 }
 
+export interface IssueListOptions {
+  matches?: StatusMatch[];
+  limit?: number;
+}
+
+export interface IssueListResult {
+  issues: IssueSnapshot[];
+  truncated: boolean;
+}
+
 export interface IssueProviderAdapter {
   readonly type: ProviderType;
   identity(): Promise<ProviderIdentity>;
+  list(options?: IssueListOptions): Promise<IssueListResult>;
   search(query: string, limit?: number): Promise<IssueSnapshot[]>;
   get(identifier: string): Promise<IssueSnapshot>;
   create(input: IssueCreateInput): Promise<IssueSnapshot>;

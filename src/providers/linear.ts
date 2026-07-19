@@ -3,11 +3,25 @@ import type { LinearProjectProvider, LinearProviderProfile } from "../core/types
 import { requestJson, versionOf } from "./http.ts";
 import type {
   IssueCreateInput,
+  IssueListOptions,
+  IssueListResult,
   IssueProviderAdapter,
   IssueSnapshot,
   IssueUpdateInput,
   ProviderIdentity,
 } from "./types.ts";
+
+function linearStatusFilter(match: NonNullable<IssueListOptions["matches"]>[number]) {
+  const conditions = [
+    ...(match.state ? [{ state: { name: { eqIgnoreCase: match.state } } }] : []),
+    ...match.labelsAll.map((label) => ({ labels: { name: { eqIgnoreCase: label } } })),
+    ...match.labelsNone.map((label) => ({
+      labels: { every: { name: { neqIgnoreCase: label } } },
+    })),
+  ];
+
+  return conditions.length === 1 ? conditions[0] : { and: conditions };
+}
 
 interface LinearIssue {
   id: string;
@@ -167,6 +181,36 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
       scopeId: data.organization.id,
       scopeName: data.organization.name,
     };
+  }
+
+  async list(options: IssueListOptions = {}): Promise<IssueListResult> {
+    const limit = options.limit ?? 30;
+    const projectFilter =
+      this.target.project === "none" ? { null: true } : { id: { eq: this.target.project.id } };
+    const matches = options.matches?.map(linearStatusFilter) ?? [];
+    const filter = {
+      team: { id: { eq: this.target.team.id } },
+      project: projectFilter,
+      ...(matches.length === 0 ? {} : { or: matches }),
+    };
+    const data = await this.#graphql<{
+      issues: { nodes: LinearIssue[]; pageInfo: { hasNextPage: boolean } };
+    }>(
+      `query List($filter: IssueFilter!, $first: Int!) {
+        issues(filter: $filter, first: $first, orderBy: updatedAt) {
+          nodes {
+            id identifier title description url updatedAt state { id name } labels { nodes { name } }
+            team { id }
+            project { id }
+          }
+          pageInfo { hasNextPage }
+        }
+      }`,
+      { filter, first: limit },
+    );
+    const issues = data.issues.nodes.map((issue) => this.#targetedSnapshot(issue));
+
+    return { issues, truncated: data.issues.pageInfo.hasNextPage };
   }
 
   async search(query: string, limit = 30): Promise<IssueSnapshot[]> {

@@ -21,6 +21,31 @@ function formatSchemaErrors(errors: ErrorObject[] | null | undefined): string {
     .join("; ");
 }
 
+function assertRegistryVersion(
+  value: unknown,
+  path: string,
+  currentVersion: number,
+  registry: "project" | "credential",
+): void {
+  const version =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as { version?: unknown }).version
+      : undefined;
+  if (version === currentVersion) return;
+  if (typeof version === "number" && version > currentVersion) {
+    throw new ProjectContextError(
+      "CONFIG_VERSION_NEWER",
+      `${path} uses unsupported future schema version ${version}`,
+    );
+  }
+  if (version === undefined || version === 0 || typeof version === "number") {
+    throw new ProjectContextError(
+      "CONFIG_MIGRATION_REQUIRED",
+      `${registry} registry ${path} requires migration; run project-context config migrate`,
+    );
+  }
+}
+
 async function parseYamlFile(path: string): Promise<unknown> {
   const content = await readFile(path, "utf8").catch((error) => {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
@@ -72,6 +97,7 @@ export function validateProjectsConfigValue(
   value: unknown,
   path = "projects.yaml",
 ): ProjectsConfig {
+  assertRegistryVersion(value, path, 2, "project");
   if (!validateProjectsSchema(value)) {
     throw new ProjectContextError(
       "PROJECTS_SCHEMA_INVALID",
@@ -92,6 +118,7 @@ export function validateCredentialConfigValue(
   value: unknown,
   path = "credentials.yaml",
 ): CredentialsConfig {
+  assertRegistryVersion(value, path, 1, "credential");
   if (!validateCredentialsSchema(value)) {
     throw new ProjectContextError(
       "CREDENTIALS_SCHEMA_INVALID",

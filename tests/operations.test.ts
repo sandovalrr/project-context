@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { applyIssueOperation, prepareIssueOperation } from "../src/core/operations.ts";
+import { applyIssueOperation, listIssues, prepareIssueOperation } from "../src/core/operations.ts";
 import { getPaths } from "../src/core/paths.ts";
 import { setupHostConfiguration } from "../src/core/setup.ts";
 import { withTemporaryDirectory } from "./helpers/temporary.ts";
@@ -45,7 +45,7 @@ async function withLinearFixture<T>(work: (repository: string) => Promise<T>): P
     ]);
     await writeFile(
       getPaths().projectsFile,
-      `version: 1
+      `version: 2
 providers:
   linear-example:
     type: linear
@@ -104,7 +104,7 @@ async function withFixture<T>(work: (repository: string) => Promise<T>): Promise
     ]);
     await writeFile(
       getPaths().projectsFile,
-      `version: 1
+      `version: 2
 providers:
   github-example:
     type: github
@@ -124,7 +124,17 @@ projects:
             repository: inherit
           mappings:
             status:
-              open: open
+              open:
+                state: open
+                match:
+                  state: open
+                  labels_none: [in-progress]
+              in_progress:
+                state: open
+                add_labels: [in-progress]
+                match:
+                  state: open
+                  labels_all: [in-progress]
               done: closed
 `,
     );
@@ -153,6 +163,56 @@ const issue = {
   html_url: "https://github.com/example/example-repository/issues/3",
   updated_at: "2026-07-18T10:00:00Z",
 };
+
+describe("issue listing", () => {
+  test("lists by canonical status and returns normalized status with truncation metadata", async () => {
+    await withFixture(async (repository) => {
+      const inProgress = { ...issue, labels: [{ name: "in-progress" }] };
+      const fetcher = mockFetch([
+        { id: 1, login: "example-user" },
+        { total_count: 2, items: [inProgress] },
+      ]);
+
+      const result = await listIssues({
+        cwd: repository,
+        statuses: ["in_progress"],
+        limit: 1,
+        fetcher,
+      });
+
+      expect(result).toEqual([
+        {
+          providerAlias: "github",
+          truncated: true,
+          issues: [expect.objectContaining({ identifier: "#3", canonicalStatus: "in_progress" })],
+        },
+      ]);
+      expect(String((fetcher as unknown as ReturnType<typeof mock>).mock.calls[1]?.[0])).toContain(
+        "label%3A%22in-progress%22",
+      );
+    });
+  });
+
+  test("lists all statuses when no filter is supplied and returns canonical classification", async () => {
+    await withFixture(async (repository) => {
+      const fetcher = mockFetch([
+        { id: 1, login: "example-user" },
+        { total_count: 1, items: [{ ...issue, state: "closed" }] },
+      ]);
+
+      const result = await listIssues({ cwd: repository, fetcher });
+
+      expect(result[0]?.issues[0]).toMatchObject({ status: "closed", canonicalStatus: "done" });
+      expect(result[0]?.truncated).toBe(false);
+    });
+  });
+
+  test("rejects conflicting all-provider and explicit-provider routing", async () => {
+    await expect(listIssues({ all: true, provider: "github" })).rejects.toMatchObject({
+      code: "ROUTING_CONFLICT",
+    });
+  });
+});
 
 const linearIdentity = {
   data: {
