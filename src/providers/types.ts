@@ -48,11 +48,27 @@ export interface IssueListResult {
   truncated: boolean;
 }
 
+export interface AssignableUser {
+  provider: ProviderType;
+  assignee: string;
+  displayName: string;
+  username: string | null;
+  email: string | null;
+  active: boolean;
+}
+
+export interface UserListResult {
+  users: AssignableUser[];
+  truncated: boolean;
+}
+
 export interface IssueProviderAdapter {
   readonly type: ProviderType;
   identity(): Promise<ProviderIdentity>;
   list(options?: IssueListOptions): Promise<IssueListResult>;
   search(query: string, limit?: number): Promise<IssueSnapshot[]>;
+  listUsers(limit?: number): Promise<UserListResult>;
+  searchUsers(query: string, limit?: number): Promise<UserListResult>;
   get(identifier: string): Promise<IssueSnapshot>;
   create(input: IssueCreateInput): Promise<IssueSnapshot>;
   update(identifier: string, input: IssueUpdateInput): Promise<IssueSnapshot>;

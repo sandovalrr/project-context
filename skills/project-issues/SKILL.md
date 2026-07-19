@@ -35,6 +35,13 @@ Never infer a provider from issue wording. Never retry a failed provider operati
 - For an unconfigured repository, explain that host-local context is missing. Conversational or explicitly supplied context may support a read, but do not treat it as write authorization.
 - GitHub pull requests are outside this skill even though the GitHub Issues API can return them.
 
+## Resolve Assignees
+
+- Use `search_users` when the user names or describes an assignee. Use `list_users` when they ask who can be assigned or when no useful search text is available.
+- Treat the returned `assignee` field as opaque provider-native data. Pass it unchanged in the `assignee` field of a prepared create or update.
+- If no users match, say so. If multiple users plausibly match, show the available display name, username, and email and ask the user to choose. Never guess based on name similarity.
+- Results are restricted to active users assignable within the configured issue target. Treat `truncated: true` as incomplete and narrow the search before assigning.
+
 ## Write Issues Safely
 
 All external writes use two phases:

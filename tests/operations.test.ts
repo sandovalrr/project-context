@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { applyIssueOperation, listIssues, prepareIssueOperation } from "../src/core/operations.ts";
+import {
+  applyIssueOperation,
+  listIssues,
+  listUsers,
+  prepareIssueOperation,
+  searchUsers,
+} from "../src/core/operations.ts";
 import { getPaths } from "../src/core/paths.ts";
 import { setupHostConfiguration } from "../src/core/setup.ts";
 import { withTemporaryDirectory } from "./helpers/temporary.ts";
@@ -210,6 +216,53 @@ describe("issue listing", () => {
   test("rejects conflicting all-provider and explicit-provider routing", async () => {
     await expect(listIssues({ all: true, provider: "github" })).rejects.toMatchObject({
       code: "ROUTING_CONFLICT",
+    });
+  });
+});
+
+describe("assignable user discovery", () => {
+  test("lists normalized users from the routed provider", async () => {
+    await withFixture(async (repository) => {
+      const fetcher = mockFetch([
+        { id: 1, login: "example-user" },
+        [
+          { id: 1, login: "dioni" },
+          { id: 2, login: "richard" },
+        ],
+      ]);
+
+      expect(await listUsers({ cwd: repository, limit: 1, fetcher })).toEqual([
+        {
+          providerAlias: "github",
+          users: [expect.objectContaining({ assignee: "dioni", provider: "github" })],
+          truncated: true,
+        },
+      ]);
+    });
+  });
+
+  test("searches assignable users without guessing a single match", async () => {
+    await withFixture(async (repository) => {
+      const fetcher = mockFetch([
+        { id: 1, login: "example-user" },
+        [
+          { id: 1, login: "dioni" },
+          { id: 2, login: "dionisia" },
+        ],
+      ]);
+
+      const result = await searchUsers("dioni", { cwd: repository, fetcher });
+
+      expect(result[0]?.users).toHaveLength(2);
+    });
+  });
+
+  test("rejects conflicting routing and invalid limits", async () => {
+    await expect(listUsers({ all: true, provider: "github" })).rejects.toMatchObject({
+      code: "ROUTING_CONFLICT",
+    });
+    await expect(searchUsers("dioni", { limit: 0 })).rejects.toMatchObject({
+      code: "LIMIT_INVALID",
     });
   });
 });

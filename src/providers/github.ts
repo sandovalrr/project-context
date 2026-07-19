@@ -2,6 +2,7 @@ import { ProjectContextError } from "../core/errors.ts";
 import type { GitHubProjectProvider, GitHubProviderProfile } from "../core/types.ts";
 import { requestJson, versionOf } from "./http.ts";
 import type {
+  AssignableUser,
   IssueCreateInput,
   IssueListOptions,
   IssueListResult,
@@ -9,6 +10,7 @@ import type {
   IssueSnapshot,
   IssueUpdateInput,
   ProviderIdentity,
+  UserListResult,
 } from "./types.ts";
 
 function quotedQualifier(name: string, value: string, negative = false): string {
@@ -43,6 +45,11 @@ interface GitHubIssue {
   updated_at: string;
   labels?: Array<string | { name?: string }>;
   pull_request?: unknown;
+}
+
+interface GitHubAssignableUser {
+  id: number;
+  login: string;
 }
 
 export class GitHubIssuesAdapter implements IssueProviderAdapter {
@@ -91,6 +98,50 @@ export class GitHubIssuesAdapter implements IssueProviderAdapter {
 
   #issuePath(suffix = ""): string {
     return `/repos/${encodeURIComponent(this.#repository.owner)}/${encodeURIComponent(this.#repository.name)}/issues${suffix}`;
+  }
+
+  #assigneePath(parameters: URLSearchParams): string {
+    return `/repos/${encodeURIComponent(this.#repository.owner)}/${encodeURIComponent(this.#repository.name)}/assignees?${parameters}`;
+  }
+
+  #assignableUser(user: GitHubAssignableUser): AssignableUser {
+    return {
+      provider: this.type,
+      assignee: user.login,
+      displayName: user.login,
+      username: user.login,
+      email: null,
+      active: true,
+    };
+  }
+
+  async #collectAssignableUsers(
+    query: string | undefined,
+    limit: number,
+    page = 1,
+    collected: GitHubAssignableUser[] = [],
+  ): Promise<GitHubAssignableUser[]> {
+    const pageSize = query ? 100 : Math.min(limit + 1, 100);
+    const parameters = new URLSearchParams({ per_page: String(pageSize), page: String(page) });
+    const pageUsers = await this.#request<GitHubAssignableUser[]>(this.#assigneePath(parameters));
+    const normalizedQuery = query?.trim().toLocaleLowerCase();
+    const matches = normalizedQuery
+      ? pageUsers.filter((user) => user.login.toLocaleLowerCase().includes(normalizedQuery))
+      : pageUsers;
+    const users = [...collected, ...matches];
+    const exhausted = pageUsers.length < pageSize;
+
+    if (users.length > limit || exhausted) return users;
+    return this.#collectAssignableUsers(query, limit, page + 1, users);
+  }
+
+  async #users(query: string | undefined, limit: number): Promise<UserListResult> {
+    const users = await this.#collectAssignableUsers(query, limit);
+
+    return {
+      users: users.slice(0, limit).map((user) => this.#assignableUser(user)),
+      truncated: users.length > limit,
+    };
   }
 
   #snapshot(issue: GitHubIssue): IssueSnapshot {
@@ -155,6 +206,14 @@ export class GitHubIssuesAdapter implements IssueProviderAdapter {
     return result.items
       .filter((issue) => !issue.pull_request)
       .map((issue) => this.#snapshot(issue));
+  }
+
+  listUsers(limit = 30): Promise<UserListResult> {
+    return this.#users(undefined, limit);
+  }
+
+  searchUsers(query: string, limit = 30): Promise<UserListResult> {
+    return this.#users(query, limit);
   }
 
   async get(identifier: string): Promise<IssueSnapshot> {

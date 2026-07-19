@@ -140,6 +140,52 @@ describe("GitHub Issues adapter", () => {
     expect(query).toContain("sort=updated");
     expect(query).toContain("order=desc");
   });
+
+  test("lists and searches repository-assignable users", async () => {
+    const users = [
+      { id: 1, login: "dioni" },
+      { id: 2, login: "richard" },
+      { id: 3, login: "someone-else" },
+    ];
+    const { fetcher, requests } = mockFetch([users, users]);
+    const adapter = new GitHubIssuesAdapter(
+      githubProfile,
+      githubTarget,
+      { token: "secret" },
+      fetcher,
+      { owner: "acme", name: "payments" },
+    );
+
+    expect(await adapter.listUsers(2)).toEqual({
+      users: [
+        {
+          provider: "github",
+          assignee: "dioni",
+          displayName: "dioni",
+          username: "dioni",
+          email: null,
+          active: true,
+        },
+        {
+          provider: "github",
+          assignee: "richard",
+          displayName: "richard",
+          username: "richard",
+          email: null,
+          active: true,
+        },
+      ],
+      truncated: true,
+    });
+    expect(await adapter.searchUsers("DION", 2)).toMatchObject({
+      users: [{ assignee: "dioni" }],
+      truncated: false,
+    });
+    expect(requests.map(({ url }) => decodeURIComponent(url))).toEqual([
+      "https://api.github.com/repos/acme/payments/assignees?per_page=3&page=1",
+      "https://api.github.com/repos/acme/payments/assignees?per_page=100&page=1",
+    ]);
+  });
 });
 
 describe("Linear adapter", () => {
@@ -336,6 +382,46 @@ describe("Linear adapter", () => {
     const body = JSON.parse(String(requests[1]?.init?.body));
     expect(body.variables.input).toMatchObject({ priority: 2, labelIds: ["label-1"] });
   });
+
+  test("lists and searches active members of the configured team", async () => {
+    const users = [
+      { id: "user-1", name: "Dioni Ripoll", email: "dioni@example.com", active: true },
+      { id: "user-2", name: "Richard Sandoval", email: "richard@example.com", active: true },
+      { id: "user-3", name: "Former User", email: "former@example.com", active: false },
+    ];
+    const page = {
+      data: { team: { members: { nodes: users, pageInfo: { hasNextPage: false } } } },
+    };
+    const { fetcher, requests } = mockFetch([page, page]);
+    const adapter = new LinearIssuesAdapter(
+      linearProfile,
+      linearTarget,
+      { token: "secret" },
+      fetcher,
+    );
+
+    expect(await adapter.listUsers(1)).toEqual({
+      users: [
+        {
+          provider: "linear",
+          assignee: "user-1",
+          displayName: "Dioni Ripoll",
+          username: null,
+          email: "dioni@example.com",
+          active: true,
+        },
+      ],
+      truncated: true,
+    });
+    expect(await adapter.searchUsers("richard@example", 10)).toMatchObject({
+      users: [{ assignee: "user-2", displayName: "Richard Sandoval" }],
+      truncated: false,
+    });
+    const bodies = requests.map(({ init }) => JSON.parse(String(init?.body)));
+    expect(bodies[0]?.query).toContain("team(id: $teamId)");
+    expect(bodies[0]?.query).toContain("members(first: $first");
+    expect(bodies[0]?.variables).toMatchObject({ teamId: "team-1", first: 2 });
+  });
 });
 
 describe("Jira Cloud adapter", () => {
@@ -462,6 +548,51 @@ describe("Jira Cloud adapter", () => {
     await expect(adapter.get("OTHER-4")).rejects.toMatchObject({
       code: "ISSUE_OUTSIDE_TARGET",
     });
+  });
+
+  test("lists and searches users assignable to the configured project", async () => {
+    const users = [
+      {
+        accountId: "account-dioni",
+        displayName: "Dioni Ripoll",
+        emailAddress: "dioni@example.com",
+        active: true,
+      },
+      {
+        accountId: "account-richard",
+        displayName: "Richard Sandoval",
+        active: true,
+      },
+    ];
+    const { fetcher, requests } = mockFetch([users, [users[1]]]);
+    const adapter = new JiraCloudIssuesAdapter(
+      jiraProfile,
+      jiraTarget,
+      { email: "r@example.com", token: "secret" },
+      fetcher,
+    );
+
+    expect(await adapter.listUsers(1)).toMatchObject({
+      users: [
+        {
+          provider: "jira-cloud",
+          assignee: "account-dioni",
+          displayName: "Dioni Ripoll",
+          username: null,
+          email: "dioni@example.com",
+          active: true,
+        },
+      ],
+      truncated: true,
+    });
+    expect(await adapter.searchUsers("Richard", 10)).toMatchObject({
+      users: [{ assignee: "account-richard", email: null }],
+      truncated: false,
+    });
+    expect(requests.map(({ url }) => decodeURIComponent(url))).toEqual([
+      "https://example.atlassian.net/rest/api/3/user/assignable/search?project=10000&maxResults=2&startAt=0",
+      "https://example.atlassian.net/rest/api/3/user/assignable/search?project=10000&query=Richard&maxResults=11&startAt=0",
+    ]);
   });
 });
 

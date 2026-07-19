@@ -8,8 +8,10 @@ import {
   applyIssueOperation,
   getIssue,
   listIssues,
+  listUsers,
   prepareIssueOperation,
   searchIssues,
+  searchUsers,
 } from "./core/operations.ts";
 import type { IssueOperationRequest } from "./core/pending.ts";
 import { CANONICAL_STATUSES } from "./core/types.ts";
@@ -56,6 +58,21 @@ const listResultSchema = z.array(
   z.object({
     providerAlias: z.string(),
     issues: z.array(issueSchema.extend({ canonicalStatus: canonicalStatusSchema.nullable() })),
+    truncated: z.boolean(),
+  }),
+);
+const userSchema = z.object({
+  provider: providerTypeSchema,
+  assignee: z.string(),
+  displayName: z.string(),
+  username: z.string().nullable(),
+  email: z.string().nullable(),
+  active: z.boolean(),
+});
+const userListResultSchema = z.array(
+  z.object({
+    providerAlias: z.string(),
+    users: z.array(userSchema),
     truncated: z.boolean(),
   }),
 );
@@ -168,7 +185,7 @@ export function createProjectIssuesServer(): McpServer {
     { name: SERVER_NAME, version: PACKAGE_VERSION },
     {
       instructions:
-        "Resolve repository context before issue work. Use list_issues for canonical status filters and search_issues only for title or description text. Reads are provider-routed. External writes require prepare_issue_change followed by apply_issue_change using the returned short-lived token.",
+        "Resolve repository context before issue work. Use list_issues for canonical status filters and search_issues only for title or description text. Use list_users or search_users to obtain an exact assignee value before assigning; ask the user to choose when matches are ambiguous. Reads are provider-routed. External writes require prepare_issue_change followed by apply_issue_change using the returned short-lived token.",
     },
   );
 
@@ -246,6 +263,65 @@ export function createProjectIssuesServer(): McpServer {
     ({ query, cwd, provider, all, limit }) =>
       safely(async () =>
         searchIssues(query, {
+          cwd: await resolveMcpWorkingDirectory(server, cwd),
+          ...(provider ? { provider } : {}),
+          ...(all === undefined ? {} : { all }),
+          ...(limit === undefined ? {} : { limit }),
+        }),
+      ),
+  );
+
+  server.registerTool(
+    "list_users",
+    {
+      title: "List assignable users",
+      description:
+        "List active users assignable to issues in the configured target. Pass a returned assignee value unchanged when preparing a create or update.",
+      inputSchema: {
+        cwd: cwdSchema,
+        provider: providerSchema,
+        all: z
+          .boolean()
+          .optional()
+          .describe("List from all configured providers only when explicitly true"),
+        limit: z.number().int().min(1).max(100).optional(),
+      },
+      outputSchema: resultSchema(userListResultSchema),
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    },
+    ({ cwd, provider, all, limit }) =>
+      safely(async () =>
+        listUsers({
+          cwd: await resolveMcpWorkingDirectory(server, cwd),
+          ...(provider ? { provider } : {}),
+          ...(all === undefined ? {} : { all }),
+          ...(limit === undefined ? {} : { limit }),
+        }),
+      ),
+  );
+
+  server.registerTool(
+    "search_users",
+    {
+      title: "Search assignable users",
+      description:
+        "Search active users assignable to issues by name, username, or email where the configured provider exposes those fields. Return every match and ask the user to choose when ambiguous.",
+      inputSchema: {
+        query: z.string().min(1),
+        cwd: cwdSchema,
+        provider: providerSchema,
+        all: z
+          .boolean()
+          .optional()
+          .describe("Search all configured providers only when explicitly true"),
+        limit: z.number().int().min(1).max(100).optional(),
+      },
+      outputSchema: resultSchema(userListResultSchema),
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    },
+    ({ query, cwd, provider, all, limit }) =>
+      safely(async () =>
+        searchUsers(query, {
           cwd: await resolveMcpWorkingDirectory(server, cwd),
           ...(provider ? { provider } : {}),
           ...(all === undefined ? {} : { all }),
