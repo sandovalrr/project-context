@@ -6,6 +6,8 @@
 - Expected identity: workspace ID and display name.
 - Required target: team.
 - Optional target: explicit project object or `none`.
+- Search, direct lookup, and mutation revalidation reject issues outside the
+  configured team/project target.
 - Canonical states require explicit project mappings.
 - Issue URLs are added through comments when a native relation is unavailable.
 
@@ -24,6 +26,8 @@
 - Authentication: account email plus API token.
 - Expected identity: site and account ID.
 - Required target: Jira project.
+- Search, direct lookup, and mutation revalidation reject issues outside the
+  configured project target.
 - Canonical state mappings resolve to one uniquely named available transition.
 - Jira Server and Data Center are unsupported in schema version 1.
 
@@ -33,3 +37,6 @@ Adapters expose provider-neutral read/search, create, update, comment,
 transition, close/reopen, and related-link operations where the provider
 supports them. Permanent deletion is never exposed. Unsupported native features
 produce a capability error rather than an approximation.
+
+`search_issues` accepts title/description text. It is not a status or structured
+filter; workflow filtering requires a separate future capability.

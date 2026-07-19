@@ -179,9 +179,13 @@ export function createProjectIssuesServer(): McpServer {
     "search_issues",
     {
       title: "Search issues",
-      description: "Search the default or explicitly selected configured issue provider.",
+      description:
+        "Search issue titles and descriptions in the default or explicitly selected configured provider.",
       inputSchema: {
-        query: z.string().min(1),
+        query: z
+          .string()
+          .min(1)
+          .describe("Title/description text only; not a status or structured filter"),
         cwd: cwdSchema,
         provider: providerSchema,
         all: z

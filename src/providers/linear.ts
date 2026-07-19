@@ -74,6 +74,26 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
     };
   }
 
+  #assertTarget(issue: LinearIssue): void {
+    const teamMatches = issue.team?.id === this.target.team.id;
+    const projectMatches =
+      Object.hasOwn(issue, "project") &&
+      (this.target.project === "none"
+        ? issue.project === null
+        : issue.project?.id === this.target.project.id);
+    if (teamMatches && projectMatches) return;
+
+    throw new ProjectContextError(
+      "ISSUE_OUTSIDE_TARGET",
+      "Linear issue is outside the configured team/project target",
+    );
+  }
+
+  #targetedSnapshot(issue: LinearIssue): IssueSnapshot {
+    this.#assertTarget(issue);
+    return this.#snapshot(issue);
+  }
+
   #priority(value: string | number): number {
     if (typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 4)
       return value;
@@ -173,17 +193,21 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
       }`,
       { filter, first: limit },
     );
-    return data.issues.nodes.map((issue) => this.#snapshot(issue));
+    return data.issues.nodes.map((issue) => this.#targetedSnapshot(issue));
   }
 
   async get(identifier: string): Promise<IssueSnapshot> {
     const data = await this.#graphql<{ issue: LinearIssue }>(
       `query Issue($id: String!) {
-        issue(id: $id) { id identifier title description url updatedAt state { id name } labels { nodes { name } } }
+        issue(id: $id) {
+          id identifier title description url updatedAt state { id name } labels { nodes { name } }
+          team { id }
+          project { id }
+        }
       }`,
       { id: identifier },
     );
-    return this.#snapshot(data.issue);
+    return this.#targetedSnapshot(data.issue);
   }
 
   async create(input: IssueCreateInput): Promise<IssueSnapshot> {

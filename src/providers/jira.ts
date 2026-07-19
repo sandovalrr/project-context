@@ -17,6 +17,7 @@ interface JiraIssue {
     summary: string;
     description?: unknown;
     status: { name: string };
+    project?: { id: string };
     updated: string;
     labels?: string[];
   };
@@ -104,6 +105,20 @@ export class JiraCloudIssuesAdapter implements IssueProviderAdapter {
     };
   }
 
+  #assertTarget(issue: JiraIssue): void {
+    if (issue.fields.project?.id === this.target.project.id) return;
+
+    throw new ProjectContextError(
+      "ISSUE_OUTSIDE_TARGET",
+      "Jira issue is outside the configured project target",
+    );
+  }
+
+  #targetedSnapshot(issue: JiraIssue): IssueSnapshot {
+    this.#assertTarget(issue);
+    return this.#snapshot(issue);
+  }
+
   async identity(): Promise<ProviderIdentity> {
     const user = await this.#request<{
       accountId: string;
@@ -127,17 +142,17 @@ export class JiraCloudIssuesAdapter implements IssueProviderAdapter {
       {
         jql,
         maxResults: limit,
-        fields: ["summary", "description", "status", "updated", "labels"],
+        fields: ["summary", "description", "status", "project", "updated", "labels"],
       },
       "read",
     );
-    return data.issues.map((issue) => this.#snapshot(issue));
+    return data.issues.map((issue) => this.#targetedSnapshot(issue));
   }
 
   async get(identifier: string): Promise<IssueSnapshot> {
-    return this.#snapshot(
+    return this.#targetedSnapshot(
       await this.#request<JiraIssue>(
-        `/rest/api/3/issue/${encodeURIComponent(identifier)}?fields=summary,description,status,updated,labels`,
+        `/rest/api/3/issue/${encodeURIComponent(identifier)}?fields=summary,description,status,project,updated,labels`,
       ),
     );
   }
