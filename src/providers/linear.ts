@@ -4,6 +4,8 @@ import { filterIssueOptions, issueFieldCapability } from "./capabilities.ts";
 import { requestJson, versionOf } from "./http.ts";
 import type {
   AssignableUser,
+  IssueComment,
+  IssueCommentListResult,
   IssueCreateInput,
   IssueListOptions,
   IssueListResult,
@@ -67,6 +69,15 @@ interface LinearAssignableUser {
 interface LinearUserPage {
   nodes: LinearAssignableUser[];
   pageInfo: { hasNextPage: boolean; endCursor?: string | null };
+}
+
+interface LinearComment {
+  id: string;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+  url?: string | null;
+  user?: Omit<LinearAssignableUser, "active"> | null;
 }
 
 export class LinearIssuesAdapter implements IssueProviderAdapter {
@@ -218,6 +229,18 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
   #targetedSnapshot(issue: LinearIssue): IssueSnapshot {
     this.#assertTarget(issue);
     return this.#snapshot(issue);
+  }
+
+  #comment(comment: LinearComment): IssueComment {
+    return {
+      provider: this.type,
+      id: comment.id,
+      body: comment.body,
+      author: comment.user ? this.#issueUser(comment.user) : null,
+      createdAt: comment.createdAt,
+      updatedAt: comment.updatedAt,
+      url: comment.url ?? null,
+    };
   }
 
   #priority(value: string | number): number {
@@ -482,6 +505,41 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
       { id: identifier },
     );
     return this.#targetedSnapshot(data.issue);
+  }
+
+  async listComments(identifier: string, limit = 30): Promise<IssueCommentListResult> {
+    const data = await this.#graphql<{
+      issue: LinearIssue & {
+        comments: {
+          nodes: LinearComment[];
+          pageInfo: { hasPreviousPage: boolean };
+        };
+      };
+    }>(
+      `query IssueComments($id: String!, $last: Int!) {
+        issue(id: $id) {
+          id identifier
+          team { id }
+          project { id }
+          comments(last: $last) {
+            nodes {
+              id body createdAt updatedAt url
+              user { id name email }
+            }
+            pageInfo { hasPreviousPage }
+          }
+        }
+      }`,
+      { id: identifier, last: limit },
+    );
+    this.#assertTarget(data.issue);
+
+    return {
+      comments: data.issue.comments.nodes
+        .toSorted((left, right) => right.createdAt.localeCompare(left.createdAt))
+        .map((comment) => this.#comment(comment)),
+      truncated: data.issue.comments.pageInfo.hasPreviousPage,
+    };
   }
 
   async create(input: IssueCreateInput): Promise<IssueSnapshot> {

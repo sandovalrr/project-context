@@ -30,6 +30,7 @@ Never infer a provider from issue wording. Never retry a failed provider operati
 ## Read Issues
 
 - Use `list_issues` for canonical status filters, `search_issues` only for title/description text, and `get_issue` for a single issue.
+- Use `list_issue_comments` when the user needs the discussion on one issue. Results are newest first and target-scoped; `truncated: true` means older comments were omitted. This tool does not return field history or a full activity timeline.
 - Use `get_issue_capabilities` before creating an issue or whenever valid labels, priorities, issue types, canonical statuses, defaults, or presets are unknown. Pass returned option values unchanged.
 - Use `search_issue_options` when a label, priority, or issue type capability points to it, when its inline catalog is truncated, or when a large catalog needs narrowing. Pass the returned value unchanged.
 - Treat capability `operations` as authoritative. An empty option list does not mean arbitrary values are valid; check `acceptsCustomValues`, `defaultValue`, and `discoveryTool`.

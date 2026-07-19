@@ -22,6 +22,7 @@ import {
   applyIssueOperation,
   getIssue,
   getIssueCapabilities,
+  listIssueComments,
   listIssues,
   listUsers,
   prepareIssueOperation,
@@ -508,6 +509,38 @@ const cli = yargs(hideBin(process.argv))
               ),
           )
           .demandCommand(1, "Choose list or search")
+          .strictCommands(),
+      )
+      .command("comment", "Read issue comments", (comment) =>
+        comment
+          .command(
+            "list <reference>",
+            "List target-scoped comments newest first",
+            (command) =>
+              command
+                .positional("reference", { type: "string", demandOption: true })
+                .option("limit", {
+                  type: "number",
+                  default: 30,
+                  description: "Maximum comments to return",
+                })
+                .check((argv) => {
+                  if (!Number.isInteger(argv.limit) || argv.limit < 1 || argv.limit > 100) {
+                    throw new Error("--limit must be an integer between 1 and 100");
+                  }
+                  return true;
+                }),
+            async (argv) =>
+              print(
+                await listIssueComments(argv.reference, {
+                  cwd: argv.cwd ?? process.cwd(),
+                  ...(argv.provider ? { provider: argv.provider } : {}),
+                  limit: argv.limit,
+                }),
+                argv,
+              ),
+          )
+          .demandCommand(1, "Choose list")
           .strictCommands(),
       )
       .command(

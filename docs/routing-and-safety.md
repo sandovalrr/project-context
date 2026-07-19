@@ -25,6 +25,14 @@ the configured team and explicit/no-project target, and Jira direct lookups
 must match the configured project. Prepare and apply re-run those checks before
 an external mutation can proceed.
 
+Comment reads use the same deterministic routing and return only comments from
+the configured issue target. Linear validates team and project in the comment
+query. Jira validates the project before and after its separate comment page
+request. GitHub uses a repository-scoped endpoint and rejects pull requests,
+even though GitHub exposes pull-request comments through its Issues API.
+Providers use bounded pagination and normalize results newest first; a
+`truncated` result means older comments were not returned.
+
 ## Missing repository configuration
 
 Normal coding work may continue with issue integration marked unresolved.

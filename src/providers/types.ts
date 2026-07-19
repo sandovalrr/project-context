@@ -28,6 +28,21 @@ export interface IssueOptionListResult {
   truncated: boolean;
 }
 
+export interface IssueComment {
+  provider: ProviderType;
+  id: string;
+  body: string;
+  author: IssueUser | null;
+  createdAt: string;
+  updatedAt: string;
+  url: string | null;
+}
+
+export interface IssueCommentListResult {
+  comments: IssueComment[];
+  truncated: boolean;
+}
+
 export interface IssueSnapshot {
   provider: ProviderType;
   id: string;
@@ -128,6 +143,7 @@ export interface IssueProviderAdapter {
   ): Promise<IssueOptionListResult>;
   capabilities(): Promise<ProviderIssueCapabilities>;
   get(identifier: string): Promise<IssueSnapshot>;
+  listComments(identifier: string, limit?: number): Promise<IssueCommentListResult>;
   create(input: IssueCreateInput): Promise<IssueSnapshot>;
   update(identifier: string, input: IssueUpdateInput): Promise<IssueSnapshot>;
   comment(identifier: string, body: string): Promise<void>;

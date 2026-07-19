@@ -11,6 +11,7 @@ project-context issue option search <labels|priority|issueType> <query> [--provi
 project-context issue user list [--provider <alias> | --all]
 project-context issue user search <query> [--provider <alias> | --all]
 project-context issue get <reference> [--provider <alias>]
+project-context issue comment list <reference> [--provider <alias>] [--limit <1-100>]
 project-context issue prepare create --title <title> [--description <text>] [--preset <name>]
 project-context issue prepare update --ref <reference> --title <title>
 project-context issue prepare comment --ref <reference> --body <text>

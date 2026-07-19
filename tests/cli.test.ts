@@ -43,6 +43,11 @@ describe("CLI usability", () => {
     expect(capabilities.stdout.toString()).toContain("--provider");
     expect(capabilities.stdout.toString()).toContain("--all");
 
+    const comments = cli("issue", "comment", "list", "--help");
+    expect(comments.exitCode).toBe(0);
+    expect(comments.stdout.toString()).toContain("<reference>");
+    expect(comments.stdout.toString()).toContain("--limit");
+
     const options = cli("issue", "option", "search", "--help");
     expect(options.exitCode).toBe(0);
     expect(options.stdout.toString()).toContain("<field>");

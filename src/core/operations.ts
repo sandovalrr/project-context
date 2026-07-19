@@ -7,6 +7,7 @@ import {
 } from "../providers/factory.ts";
 import type {
   AssignableUser,
+  IssueComment,
   IssueCreateInput,
   IssueFieldCapability,
   IssueFieldName,
@@ -875,5 +876,44 @@ export async function getIssue(
   return {
     providerAlias: current.providerAlias,
     issue: await current.adapter.get(current.routedReference ?? reference),
+  };
+}
+
+export interface IssueCommentListGroup {
+  providerAlias: string;
+  providerType: ProviderType;
+  issueIdentifier: string;
+  comments: IssueComment[];
+  truncated: boolean;
+}
+
+export async function listIssueComments(
+  reference: string,
+  options: { cwd?: string; provider?: string; limit?: number; fetcher?: typeof fetch } = {},
+): Promise<IssueCommentListGroup> {
+  if (
+    options.limit !== undefined &&
+    (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > 100)
+  ) {
+    throw new ProjectContextError(
+      "LIMIT_INVALID",
+      "Issue comment list limit must be between 1 and 100",
+    );
+  }
+
+  const current = await runtime(options.cwd ?? process.cwd(), {
+    ...(options.provider ? { explicitProvider: options.provider } : {}),
+    reference,
+    ...(options.fetcher ? { fetcher: options.fetcher } : {}),
+  });
+  const issueIdentifier = current.routedReference ?? reference;
+  const result = await current.adapter.listComments(issueIdentifier, options.limit);
+
+  return {
+    providerAlias: current.providerAlias,
+    providerType: current.provider.type,
+    issueIdentifier,
+    comments: result.comments,
+    truncated: result.truncated,
   };
 }

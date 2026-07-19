@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   applyIssueOperation,
   getIssueCapabilities,
+  listIssueComments,
   listIssues,
   listUsers,
   prepareIssueOperation,
@@ -355,6 +356,53 @@ describe("issue option discovery", () => {
       searchIssueOptions("labels", "bug", { all: true, provider: "github" }),
     ).rejects.toMatchObject({ code: "ROUTING_CONFLICT" });
     await expect(searchIssueOptions("labels", "bug", { limit: 101 })).rejects.toMatchObject({
+      code: "LIMIT_INVALID",
+    });
+  });
+});
+
+describe("issue comment reading", () => {
+  test("routes a reference and returns normalized target-scoped comments", async () => {
+    await withFixture(async (repository) => {
+      const commentedIssue = { ...issue, comments: 1 };
+      const fetcher = mockFetch([
+        { id: 1, login: "example-user" },
+        commentedIssue,
+        [
+          {
+            id: 80,
+            body: "A useful comment",
+            user: { id: 2, login: "dioni" },
+            created_at: "2026-07-18T11:00:00Z",
+            updated_at: "2026-07-18T11:30:00Z",
+            html_url: "https://github.com/example/example-repository/issues/3#issuecomment-80",
+          },
+        ],
+        commentedIssue,
+      ]);
+
+      expect(
+        await listIssueComments("github:#3", {
+          cwd: repository,
+          limit: 1,
+          fetcher,
+        }),
+      ).toMatchObject({
+        providerAlias: "github",
+        providerType: "github",
+        issueIdentifier: "#3",
+        comments: [{ id: "80", body: "A useful comment", author: { username: "dioni" } }],
+        truncated: false,
+      });
+      await expect(readFile(getPaths().auditFile, "utf8")).rejects.toThrow();
+    });
+  });
+
+  test("rejects invalid comment limits before provider access", async () => {
+    await expect(listIssueComments("#3", { limit: 0 })).rejects.toMatchObject({
+      code: "LIMIT_INVALID",
+    });
+    await expect(listIssueComments("#3", { limit: 101 })).rejects.toMatchObject({
       code: "LIMIT_INVALID",
     });
   });
