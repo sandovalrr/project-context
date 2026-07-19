@@ -1,3 +1,10 @@
+## [0.1.2](https://github.com/sandovalrr/project-context/compare/v0.1.1...v0.1.2) (2026-07-19)
+
+
+### Bug Fixes
+
+* **security:** enforce configured issue targets ([#16](https://github.com/sandovalrr/project-context/issues/16)) ([46bd828](https://github.com/sandovalrr/project-context/commit/46bd828a47f14e0924c3c222c19611f025abbcf5))
+
 ## [0.1.1](https://github.com/sandovalrr/project-context/compare/v0.1.0...v0.1.1) (2026-07-19)
 
 
