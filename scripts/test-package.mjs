@@ -53,9 +53,11 @@ try {
     "apply_issue_change",
     "get_issue",
     "list_issues",
+    "list_users",
     "prepare_issue_change",
     "resolve_project_context",
     "search_issues",
+    "search_users",
   ];
   if (JSON.stringify(names) !== JSON.stringify(expected)) {
     throw new Error(`Unexpected packed MCP tools: ${names.join(", ")}`);

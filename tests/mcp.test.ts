@@ -28,9 +28,11 @@ describe("provider-neutral MCP server", () => {
       "apply_issue_change",
       "get_issue",
       "list_issues",
+      "list_users",
       "prepare_issue_change",
       "resolve_project_context",
       "search_issues",
+      "search_users",
     ]);
     expect(tools.tools.every((tool) => tool.outputSchema !== undefined)).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "get_issue")?.outputSchema).toMatchObject({
@@ -68,6 +70,31 @@ describe("provider-neutral MCP server", () => {
       },
     });
     expect(listTool?.annotations?.readOnlyHint).toBe(true);
+    const listUsersTool = tools.tools.find((tool) => tool.name === "list_users");
+    expect(listUsersTool?.description).toContain("assignable");
+    expect(listUsersTool?.outputSchema).toMatchObject({
+      properties: {
+        result: {
+          items: {
+            properties: {
+              users: {
+                items: {
+                  properties: {
+                    assignee: { type: "string" },
+                    displayName: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    const searchUsersTool = tools.tools.find((tool) => tool.name === "search_users");
+    expect(searchUsersTool?.description).toContain("name, username, or email");
+    expect(searchUsersTool?.inputSchema).toMatchObject({
+      properties: { query: { type: "string", minLength: 1 } },
+    });
     expect(
       tools.tools.find((tool) => tool.name === "apply_issue_change")?.annotations?.destructiveHint,
     ).toBe(true);

@@ -2,6 +2,7 @@ import { ProjectContextError } from "../core/errors.ts";
 import type { LinearProjectProvider, LinearProviderProfile } from "../core/types.ts";
 import { requestJson, versionOf } from "./http.ts";
 import type {
+  AssignableUser,
   IssueCreateInput,
   IssueListOptions,
   IssueListResult,
@@ -9,6 +10,7 @@ import type {
   IssueSnapshot,
   IssueUpdateInput,
   ProviderIdentity,
+  UserListResult,
 } from "./types.ts";
 
 function linearStatusFilter(match: NonNullable<IssueListOptions["matches"]>[number]) {
@@ -34,6 +36,18 @@ interface LinearIssue {
   team?: { id: string };
   project?: { id: string } | null;
   labels?: { nodes: Array<{ name: string }> };
+}
+
+interface LinearAssignableUser {
+  id: string;
+  name: string;
+  email: string;
+  active: boolean;
+}
+
+interface LinearUserPage {
+  nodes: LinearAssignableUser[];
+  pageInfo: { hasNextPage: boolean; endCursor?: string | null };
 }
 
 export class LinearIssuesAdapter implements IssueProviderAdapter {
@@ -85,6 +99,66 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
       url: issue.url,
       updatedAt: issue.updatedAt,
       version: versionOf(issue.updatedAt, issue.id),
+    };
+  }
+
+  #assignableUser(user: LinearAssignableUser): AssignableUser {
+    return {
+      provider: this.type,
+      assignee: user.id,
+      displayName: user.name,
+      username: null,
+      email: user.email || null,
+      active: user.active,
+    };
+  }
+
+  async #userPage(first: number, after?: string): Promise<LinearUserPage> {
+    const data = await this.#graphql<{ team: { members: LinearUserPage } }>(
+      `query TeamUsers($teamId: String!, $first: Int!, $after: String) {
+        team(id: $teamId) {
+          members(first: $first, after: $after) {
+            nodes { id name email active }
+            pageInfo { hasNextPage endCursor }
+          }
+        }
+      }`,
+      { teamId: this.target.team.id, first, ...(after ? { after } : {}) },
+    );
+
+    return data.team.members;
+  }
+
+  async #collectAssignableUsers(
+    query: string | undefined,
+    limit: number,
+    after?: string,
+    collected: LinearAssignableUser[] = [],
+  ): Promise<LinearAssignableUser[]> {
+    const pageSize = query ? 100 : Math.min(limit + 1, 100);
+    const page = await this.#userPage(pageSize, after);
+    const normalizedQuery = query?.trim().toLocaleLowerCase();
+    const activeUsers = page.nodes.filter((user) => user.active);
+    const matches = normalizedQuery
+      ? activeUsers.filter((user) =>
+          [user.name, user.email].some((value) =>
+            value.toLocaleLowerCase().includes(normalizedQuery),
+          ),
+        )
+      : activeUsers;
+    const users = [...collected, ...matches];
+    const nextCursor = page.pageInfo.endCursor;
+
+    if (users.length > limit || !page.pageInfo.hasNextPage || !nextCursor) return users;
+    return this.#collectAssignableUsers(query, limit, nextCursor, users);
+  }
+
+  async #users(query: string | undefined, limit: number): Promise<UserListResult> {
+    const users = await this.#collectAssignableUsers(query, limit);
+
+    return {
+      users: users.slice(0, limit).map((user) => this.#assignableUser(user)),
+      truncated: users.length > limit,
     };
   }
 
@@ -238,6 +312,14 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
       { filter, first: limit },
     );
     return data.issues.nodes.map((issue) => this.#targetedSnapshot(issue));
+  }
+
+  listUsers(limit = 30): Promise<UserListResult> {
+    return this.#users(undefined, limit);
+  }
+
+  searchUsers(query: string, limit = 30): Promise<UserListResult> {
+    return this.#users(query, limit);
   }
 
   async get(identifier: string): Promise<IssueSnapshot> {

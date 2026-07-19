@@ -6,6 +6,7 @@ import {
   validateAdapterIdentity,
 } from "../providers/factory.ts";
 import type {
+  AssignableUser,
   IssueCreateInput,
   IssueProviderAdapter,
   IssueSnapshot,
@@ -564,6 +565,100 @@ export async function listIssues(
       ),
     ),
   );
+}
+
+export interface UserListGroup {
+  providerAlias: string;
+  users: AssignableUser[];
+  truncated: boolean;
+}
+
+interface UserDiscoveryOptions {
+  cwd?: string;
+  provider?: string;
+  all?: boolean;
+  limit?: number;
+  fetcher?: typeof fetch;
+}
+
+function validateUserDiscoveryOptions(options: UserDiscoveryOptions): void {
+  if (options.all && options.provider) {
+    throw new ProjectContextError("ROUTING_CONFLICT", "Use either --provider or --all, not both");
+  }
+  if (
+    options.limit !== undefined &&
+    (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > 100)
+  ) {
+    throw new ProjectContextError("LIMIT_INVALID", "User list limit must be between 1 and 100");
+  }
+}
+
+async function discoverUsersFromRuntime(
+  current: OperationRuntime,
+  query: string | undefined,
+  limit: number | undefined,
+): Promise<UserListGroup> {
+  const result = query
+    ? await current.adapter.searchUsers(query, limit)
+    : await current.adapter.listUsers(limit);
+
+  return {
+    providerAlias: current.providerAlias,
+    users: result.users,
+    truncated: result.truncated,
+  };
+}
+
+async function discoverUsers(
+  query: string | undefined,
+  options: UserDiscoveryOptions,
+): Promise<UserListGroup[]> {
+  validateUserDiscoveryOptions(options);
+  const cwd = options.cwd ?? process.cwd();
+  const runtimeOptions = {
+    ...(options.provider ? { explicitProvider: options.provider } : {}),
+    ...(options.fetcher ? { fetcher: options.fetcher } : {}),
+  };
+
+  if (!options.all) {
+    return [
+      await discoverUsersFromRuntime(await runtime(cwd, runtimeOptions), query, options.limit),
+    ];
+  }
+
+  const paths = getPaths();
+  const projects = await loadProjectsConfig(paths.projectsFile);
+  const repository = await resolveRepository(projects, cwd);
+  const aliases = Object.keys(repository.project.issues.providers);
+
+  return Promise.all(
+    aliases.map(async (alias) =>
+      discoverUsersFromRuntime(
+        await runtime(cwd, {
+          explicitProvider: alias,
+          ...(options.fetcher ? { fetcher: options.fetcher } : {}),
+        }),
+        query,
+        options.limit,
+      ),
+    ),
+  );
+}
+
+export function listUsers(options: UserDiscoveryOptions = {}): Promise<UserListGroup[]> {
+  return discoverUsers(undefined, options);
+}
+
+export function searchUsers(
+  query: string,
+  options: UserDiscoveryOptions = {},
+): Promise<UserListGroup[]> {
+  const normalizedQuery = query.trim();
+  if (!normalizedQuery) {
+    throw new ProjectContextError("USER_QUERY_REQUIRED", "User search query cannot be empty");
+  }
+
+  return discoverUsers(normalizedQuery, options);
 }
 
 export async function getIssue(

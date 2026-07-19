@@ -2,6 +2,7 @@ import { ProjectContextError } from "../core/errors.ts";
 import type { JiraProjectProvider, JiraProviderProfile } from "../core/types.ts";
 import { requestJson, versionOf } from "./http.ts";
 import type {
+  AssignableUser,
   IssueCreateInput,
   IssueListOptions,
   IssueListResult,
@@ -9,6 +10,7 @@ import type {
   IssueSnapshot,
   IssueUpdateInput,
   ProviderIdentity,
+  UserListResult,
 } from "./types.ts";
 
 function jqlValue(value: string): string {
@@ -37,6 +39,13 @@ interface JiraIssue {
     updated: string;
     labels?: string[];
   };
+}
+
+interface JiraAssignableUser {
+  accountId: string;
+  displayName: string;
+  emailAddress?: string;
+  active: boolean;
 }
 
 function adf(text: string) {
@@ -121,6 +130,48 @@ export class JiraCloudIssuesAdapter implements IssueProviderAdapter {
     };
   }
 
+  #assignableUser(user: JiraAssignableUser): AssignableUser {
+    return {
+      provider: this.type,
+      assignee: user.accountId,
+      displayName: user.displayName,
+      username: null,
+      email: user.emailAddress ?? null,
+      active: user.active,
+    };
+  }
+
+  async #collectAssignableUsers(
+    query: string | undefined,
+    limit: number,
+    startAt = 0,
+    collected: JiraAssignableUser[] = [],
+  ): Promise<JiraAssignableUser[]> {
+    const pageSize = Math.min(limit + 1, 100);
+    const parameters = new URLSearchParams({
+      project: this.target.project.id,
+      ...(query ? { query } : {}),
+      maxResults: String(pageSize),
+      startAt: String(startAt),
+    });
+    const page = await this.#request<JiraAssignableUser[]>(
+      `/rest/api/3/user/assignable/search?${parameters}`,
+    );
+    const users = [...collected, ...page.filter((user) => user.active)];
+
+    if (users.length > limit || page.length < pageSize) return users;
+    return this.#collectAssignableUsers(query, limit, startAt + page.length, users);
+  }
+
+  async #users(query: string | undefined, limit: number): Promise<UserListResult> {
+    const users = await this.#collectAssignableUsers(query, limit);
+
+    return {
+      users: users.slice(0, limit).map((user) => this.#assignableUser(user)),
+      truncated: users.length > limit,
+    };
+  }
+
   #assertTarget(issue: JiraIssue): void {
     if (issue.fields.project?.id === this.target.project.id) return;
 
@@ -195,6 +246,14 @@ export class JiraCloudIssuesAdapter implements IssueProviderAdapter {
       "read",
     );
     return data.issues.map((issue) => this.#targetedSnapshot(issue));
+  }
+
+  listUsers(limit = 30): Promise<UserListResult> {
+    return this.#users(undefined, limit);
+  }
+
+  searchUsers(query: string, limit = 30): Promise<UserListResult> {
+    return this.#users(query, limit);
   }
 
   async get(identifier: string): Promise<IssueSnapshot> {
