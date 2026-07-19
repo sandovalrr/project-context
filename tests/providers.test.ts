@@ -92,6 +92,43 @@ describe("GitHub Issues adapter", () => {
 });
 
 describe("Linear adapter", () => {
+  test("searches through the supported issues filter within the configured target", async () => {
+    const issue = {
+      id: "issue-1",
+      identifier: "ENG-1",
+      title: "Widget bug",
+      description: "Details",
+      url: "https://linear.app/workspace/issue/ENG-1",
+      updatedAt: "2026-07-18T10:00:00Z",
+      state: { id: "state-1", name: "Backlog" },
+      labels: { nodes: [] },
+      team: { id: "team-1" },
+      project: { id: "project-1" },
+    };
+    const target: LinearProjectProvider["target"] = {
+      team: { id: "team-1", name: "Engineering" },
+      project: { id: "project-1", name: "Widget" },
+    };
+    const { fetcher, requests } = mockFetch([{ data: { issues: { nodes: [issue] } } }]);
+    const adapter = new LinearIssuesAdapter(linearProfile, target, { token: "secret" }, fetcher);
+
+    expect((await adapter.search("widget", 1))[0]?.identifier).toBe("ENG-1");
+    const body = JSON.parse(String(requests[0]?.init?.body));
+    expect(body.query).toContain("issues(filter: $filter");
+    expect(body.query).not.toContain("issueSearch");
+    expect(body.variables).toEqual({
+      first: 1,
+      filter: {
+        team: { id: { eq: "team-1" } },
+        project: { id: { eq: "project-1" } },
+        or: [
+          { title: { containsIgnoreCase: "widget" } },
+          { description: { containsIgnoreCase: "widget" } },
+        ],
+      },
+    });
+  });
+
   test("uses the configured team and explicit no-project target", async () => {
     const issue = {
       id: "issue-1",

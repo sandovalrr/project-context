@@ -150,9 +150,20 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
   }
 
   async search(query: string, limit = 30): Promise<IssueSnapshot[]> {
-    const data = await this.#graphql<{ issueSearch: { nodes: LinearIssue[] } }>(
-      `query Search($query: String!, $first: Int!) {
-        issueSearch(query: $query, first: $first) {
+    const projectFilter =
+      this.target.project === "none" ? { null: true } : { id: { eq: this.target.project.id } };
+    const filter = {
+      team: { id: { eq: this.target.team.id } },
+      project: projectFilter,
+      or: [
+        { title: { containsIgnoreCase: query } },
+        { description: { containsIgnoreCase: query } },
+      ],
+    };
+
+    const data = await this.#graphql<{ issues: { nodes: LinearIssue[] } }>(
+      `query Search($filter: IssueFilter!, $first: Int!) {
+        issues(filter: $filter, first: $first) {
           nodes {
             id identifier title description url updatedAt state { id name } labels { nodes { name } }
             team { id }
@@ -160,14 +171,9 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
           }
         }
       }`,
-      { query, first: limit },
+      { filter, first: limit },
     );
-    return data.issueSearch.nodes
-      .filter((issue) => issue.team?.id === this.target.team.id)
-      .filter(
-        (issue) => this.target.project === "none" || issue.project?.id === this.target.project.id,
-      )
-      .map((issue) => this.#snapshot(issue));
+    return data.issues.nodes.map((issue) => this.#snapshot(issue));
   }
 
   async get(identifier: string): Promise<IssueSnapshot> {
