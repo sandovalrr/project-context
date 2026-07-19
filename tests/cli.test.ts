@@ -37,6 +37,11 @@ describe("CLI usability", () => {
     expect(users.exitCode).toBe(0);
     expect(users.stdout.toString()).toContain("list");
     expect(users.stdout.toString()).toContain("search");
+
+    const capabilities = cli("issue", "capabilities", "--help");
+    expect(capabilities.exitCode).toBe(0);
+    expect(capabilities.stdout.toString()).toContain("--provider");
+    expect(capabilities.stdout.toString()).toContain("--all");
   });
 
   test("rejects conflicting options as machine-readable JSON", () => {

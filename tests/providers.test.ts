@@ -51,6 +51,17 @@ function linearIssue(teamId: string, projectId?: string) {
     description: "Details",
     url: "https://linear.app/workspace/issue/ENG-1",
     updatedAt: "2026-07-18T10:00:00Z",
+    createdAt: "2026-07-17T10:00:00Z",
+    dueDate: "2026-07-31",
+    priority: 2,
+    priorityLabel: "High",
+    assignee: {
+      id: "user-2",
+      name: "Richard Sandoval",
+      email: "richard@example.com",
+      active: true,
+    },
+    creator: { id: "user-1", name: "Dioni Ripoll", email: "dioni@example.com" },
     state: { id: "state-1", name: "Backlog" },
     labels: { nodes: [] },
     team: { id: teamId },
@@ -78,6 +89,9 @@ describe("GitHub Issues adapter", () => {
       labels: [{ name: "bug" }],
       html_url: "https://github.com/acme/payments/issues/12",
       updated_at: "2026-07-18T10:00:00Z",
+      created_at: "2026-07-17T10:00:00Z",
+      assignee: { id: 2, login: "richard" },
+      user: { id: 1, login: "dioni" },
     };
     const { fetcher, requests } = mockFetch([
       { id: 1, login: "example-user" },
@@ -93,7 +107,14 @@ describe("GitHub Issues adapter", () => {
     );
 
     expect((await adapter.identity()).principalName).toBe("example-user");
-    expect(await adapter.search("broken")).toHaveLength(1);
+    expect((await adapter.search("broken"))[0]).toMatchObject({
+      assignee: { assignee: "richard", displayName: "richard" },
+      creator: { id: "1", displayName: "dioni" },
+      priority: null,
+      issueType: null,
+      createdAt: "2026-07-17T10:00:00Z",
+      dueDate: null,
+    });
     expect(
       (await adapter.create({ title: "Broken build", description: "Details" })).identifier,
     ).toBe("#12");
@@ -186,6 +207,50 @@ describe("GitHub Issues adapter", () => {
       "https://api.github.com/repos/acme/payments/assignees?per_page=100&page=1",
     ]);
   });
+
+  test("reports repository-scoped field capabilities", async () => {
+    const { fetcher, requests } = mockFetch([
+      [
+        { id: 1, name: "bug" },
+        { id: 2, name: "enhancement" },
+      ],
+    ]);
+    const adapter = new GitHubIssuesAdapter(
+      githubProfile,
+      githubTarget,
+      { token: "secret" },
+      fetcher,
+      { owner: "acme", name: "payments" },
+    );
+
+    expect(await adapter.capabilities()).toMatchObject({
+      fields: [
+        { field: "title", operations: ["create", "update"], requiredOnCreate: true },
+        { field: "description", operations: ["create", "update"] },
+        {
+          field: "labels",
+          operations: ["create", "update"],
+          acceptsCustomValues: false,
+          optionsTruncated: false,
+          options: [
+            { value: "bug", label: "bug" },
+            { value: "enhancement", label: "enhancement" },
+          ],
+        },
+        {
+          field: "assignee",
+          operations: ["create", "update"],
+          clearable: true,
+          discoveryTool: "search_users",
+        },
+        { field: "priority", operations: [] },
+        { field: "issueType", operations: [] },
+      ],
+    });
+    expect(decodeURIComponent(requests[0]?.url ?? "")).toBe(
+      "https://api.github.com/repos/acme/payments/labels?per_page=100&page=1",
+    );
+  });
 });
 
 describe("Linear adapter", () => {
@@ -199,7 +264,15 @@ describe("Linear adapter", () => {
     ]);
     const adapter = new LinearIssuesAdapter(linearProfile, target, { token: "secret" }, fetcher);
 
-    expect((await adapter.get("ENG-1")).identifier).toBe("ENG-1");
+    expect(await adapter.get("ENG-1")).toMatchObject({
+      identifier: "ENG-1",
+      assignee: { assignee: "user-2", displayName: "Richard Sandoval" },
+      creator: { id: "user-1", displayName: "Dioni Ripoll" },
+      priority: { value: 2, label: "High" },
+      issueType: null,
+      createdAt: "2026-07-17T10:00:00Z",
+      dueDate: "2026-07-31",
+    });
     expect(JSON.parse(String(requests[0]?.init?.body)).query).toContain("team { id }");
     expect(JSON.parse(String(requests[0]?.init?.body)).query).toContain("project { id }");
   });
@@ -422,6 +495,50 @@ describe("Linear adapter", () => {
     expect(bodies[0]?.query).toContain("members(first: $first");
     expect(bodies[0]?.variables).toMatchObject({ teamId: "team-1", first: 2 });
   });
+
+  test("reports team-scoped labels and Linear priority capabilities", async () => {
+    const { fetcher, requests } = mockFetch([
+      {
+        data: {
+          issueLabels: {
+            nodes: [
+              { id: "label-1", name: "Bug" },
+              { id: "label-2", name: "Feature" },
+            ],
+            pageInfo: { hasNextPage: true },
+          },
+        },
+      },
+    ]);
+    const adapter = new LinearIssuesAdapter(
+      linearProfile,
+      linearTarget,
+      { token: "secret" },
+      fetcher,
+    );
+
+    const result = await adapter.capabilities();
+
+    expect(result.fields.find(({ field }) => field === "labels")).toMatchObject({
+      acceptsCustomValues: false,
+      optionsTruncated: true,
+      options: [
+        { value: "Bug", label: "Bug" },
+        { value: "Feature", label: "Feature" },
+      ],
+    });
+    expect(result.fields.find(({ field }) => field === "priority")?.options).toEqual([
+      { value: 0, label: "No priority" },
+      { value: 1, label: "Urgent" },
+      { value: 2, label: "High" },
+      { value: 3, label: "Medium" },
+      { value: 4, label: "Low" },
+    ]);
+    expect(result.fields.find(({ field }) => field === "priority")?.defaultValue).toBe(0);
+    expect(result.fields.find(({ field }) => field === "issueType")?.operations).toEqual([]);
+    const body = JSON.parse(String(requests[0]?.init?.body));
+    expect(body.variables).toEqual({ teamId: "team-1", first: 101 });
+  });
 });
 
 describe("Jira Cloud adapter", () => {
@@ -441,6 +558,17 @@ describe("Jira Cloud adapter", () => {
         project: { id: "10000" },
         labels: [],
         updated: "2026-07-18T10:00:00.000+0000",
+        created: "2026-07-17T10:00:00.000+0000",
+        duedate: "2026-07-31",
+        assignee: {
+          accountId: "account-richard",
+          displayName: "Richard Sandoval",
+          emailAddress: "richard@example.com",
+          active: true,
+        },
+        creator: { accountId: "account-dioni", displayName: "Dioni Ripoll" },
+        priority: { id: "2", name: "High" },
+        issuetype: { id: "10001", name: "Bug" },
       },
     };
     const { fetcher, requests } = mockFetch([{ id: "10001", key: "OPS-4" }, issue]);
@@ -451,9 +579,15 @@ describe("Jira Cloud adapter", () => {
       fetcher,
     );
 
-    expect(
-      (await adapter.create({ title: "Broken build", description: "Details" })).description,
-    ).toBe("Details");
+    expect(await adapter.create({ title: "Broken build", description: "Details" })).toMatchObject({
+      description: "Details",
+      assignee: { assignee: "account-richard", displayName: "Richard Sandoval" },
+      creator: { id: "account-dioni", displayName: "Dioni Ripoll" },
+      priority: { value: "High", label: "High" },
+      issueType: { value: "Bug", label: "Bug" },
+      createdAt: "2026-07-17T10:00:00.000+0000",
+      dueDate: "2026-07-31",
+    });
     const body = JSON.parse(String(requests[0]?.init?.body));
     expect(body.fields.project).toEqual({ id: "10000" });
     expect(body.fields.description).toMatchObject({ type: "doc", version: 1 });
@@ -592,6 +726,56 @@ describe("Jira Cloud adapter", () => {
     expect(requests.map(({ url }) => decodeURIComponent(url))).toEqual([
       "https://example.atlassian.net/rest/api/3/user/assignable/search?project=10000&maxResults=2&startAt=0",
       "https://example.atlassian.net/rest/api/3/user/assignable/search?project=10000&query=Richard&maxResults=11&startAt=0",
+    ]);
+  });
+
+  test("reports project-scoped issue types and priorities", async () => {
+    const { fetcher, requests } = mockFetch([
+      {
+        issueTypes: [
+          { id: "10001", name: "Bug", subtask: false },
+          { id: "10002", name: "Task", subtask: false },
+        ],
+        startAt: 0,
+        maxResults: 100,
+        total: 2,
+      },
+      {
+        values: [
+          { id: "1", name: "Highest" },
+          { id: "2", name: "High" },
+        ],
+        isLast: true,
+      },
+    ]);
+    const adapter = new JiraCloudIssuesAdapter(
+      jiraProfile,
+      jiraTarget,
+      { email: "r@example.com", token: "secret" },
+      fetcher,
+    );
+
+    const result = await adapter.capabilities();
+
+    expect(result.fields.find(({ field }) => field === "labels")).toMatchObject({
+      acceptsCustomValues: true,
+      options: [],
+    });
+    expect(result.fields.find(({ field }) => field === "priority")?.options).toEqual([
+      { value: "Highest", label: "Highest" },
+      { value: "High", label: "High" },
+    ]);
+    expect(result.fields.find(({ field }) => field === "issueType")).toMatchObject({
+      defaultValue: "Task",
+      optionsTruncated: false,
+      options: [
+        { value: "Bug", label: "Bug" },
+        { value: "Task", label: "Task" },
+      ],
+    });
+    expect(requests.map(({ url }) => decodeURIComponent(url))).toEqual([
+      "https://example.atlassian.net/rest/api/3/issue/createmeta/10000/issuetypes?maxResults=100&startAt=0",
+      "https://example.atlassian.net/rest/api/3/priority/search?projectId=10000&maxResults=100&startAt=0",
     ]);
   });
 });

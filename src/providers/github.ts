@@ -1,5 +1,6 @@
 import { ProjectContextError } from "../core/errors.ts";
 import type { GitHubProjectProvider, GitHubProviderProfile } from "../core/types.ts";
+import { issueFieldCapability } from "./capabilities.ts";
 import { requestJson, versionOf } from "./http.ts";
 import type {
   AssignableUser,
@@ -9,7 +10,9 @@ import type {
   IssueProviderAdapter,
   IssueSnapshot,
   IssueUpdateInput,
+  IssueUser,
   ProviderIdentity,
+  ProviderIssueCapabilities,
   UserListResult,
 } from "./types.ts";
 
@@ -43,14 +46,24 @@ interface GitHubIssue {
   state: string;
   html_url: string;
   updated_at: string;
+  created_at?: string;
+  assignee?: GitHubUser | null;
+  user?: GitHubUser | null;
   labels?: Array<string | { name?: string }>;
   pull_request?: unknown;
 }
 
-interface GitHubAssignableUser {
+interface GitHubUser {
   id: number;
   login: string;
 }
+
+interface GitHubLabel {
+  id: number;
+  name: string;
+}
+
+type GitHubAssignableUser = GitHubUser;
 
 export class GitHubIssuesAdapter implements IssueProviderAdapter {
   readonly type = "github" as const;
@@ -115,6 +128,28 @@ export class GitHubIssuesAdapter implements IssueProviderAdapter {
     };
   }
 
+  #issueUser(user: GitHubUser): IssueUser {
+    return {
+      provider: this.type,
+      id: String(user.id),
+      displayName: user.login,
+      username: user.login,
+      email: null,
+    };
+  }
+
+  async #collectLabels(page = 1, collected: GitHubLabel[] = []): Promise<GitHubLabel[]> {
+    const parameters = new URLSearchParams({ per_page: "100", page: String(page) });
+    const labels = await this.#request<GitHubLabel[]>(
+      `/repos/${encodeURIComponent(this.#repository.owner)}/${encodeURIComponent(this.#repository.name)}/labels?${parameters}`,
+    );
+    const allLabels = [...collected, ...labels];
+
+    return allLabels.length > 100 || labels.length < 100
+      ? allLabels
+      : this.#collectLabels(page + 1, allLabels);
+  }
+
   async #collectAssignableUsers(
     query: string | undefined,
     limit: number,
@@ -155,6 +190,12 @@ export class GitHubIssuesAdapter implements IssueProviderAdapter {
       labels: (issue.labels ?? []).flatMap((label) =>
         typeof label === "string" ? [label] : label.name ? [label.name] : [],
       ),
+      assignee: issue.assignee ? this.#assignableUser(issue.assignee) : null,
+      creator: issue.user ? this.#issueUser(issue.user) : null,
+      priority: null,
+      issueType: null,
+      createdAt: issue.created_at ?? null,
+      dueDate: null,
       url: issue.html_url,
       updatedAt: issue.updated_at,
       version: versionOf(issue.updated_at, String(issue.id)),
@@ -214,6 +255,30 @@ export class GitHubIssuesAdapter implements IssueProviderAdapter {
 
   searchUsers(query: string, limit = 30): Promise<UserListResult> {
     return this.#users(query, limit);
+  }
+
+  async capabilities(): Promise<ProviderIssueCapabilities> {
+    const labels = await this.#collectLabels();
+
+    return {
+      fields: [
+        issueFieldCapability("title", ["create", "update"]),
+        issueFieldCapability("description", ["create", "update"]),
+        issueFieldCapability("labels", ["create", "update"], {
+          options: labels.slice(0, 100).map((label) => ({
+            value: label.name,
+            label: label.name,
+          })),
+          optionsTruncated: labels.length > 100,
+        }),
+        issueFieldCapability("assignee", ["create", "update"], {
+          clearable: true,
+          discoveryTool: "search_users",
+        }),
+        issueFieldCapability("priority", []),
+        issueFieldCapability("issueType", []),
+      ],
+    };
   }
 
   async get(identifier: string): Promise<IssueSnapshot> {

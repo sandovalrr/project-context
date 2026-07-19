@@ -21,6 +21,7 @@ import { migrateHostConfiguration } from "./core/migrations.ts";
 import {
   applyIssueOperation,
   getIssue,
+  getIssueCapabilities,
   listIssues,
   listUsers,
   prepareIssueOperation,
@@ -369,6 +370,27 @@ const cli = yargs(hideBin(process.argv))
   .command("issue", "List, search, read, preview, and apply issue operations", (issue) =>
     issue
       .option("provider", { type: "string", description: "Explicit configured provider alias" })
+      .command(
+        "capabilities",
+        "Get supported fields, options, statuses, defaults, and creation presets",
+        (command) =>
+          command
+            .option("all", {
+              type: "boolean",
+              default: false,
+              description: "Get capabilities from all configured providers",
+            })
+            .conflicts("all", "provider"),
+        async (argv) =>
+          print(
+            await getIssueCapabilities({
+              cwd: argv.cwd ?? process.cwd(),
+              ...(argv.provider ? { provider: argv.provider } : {}),
+              all: argv.all,
+            }),
+            argv,
+          ),
+      )
       .command("user", "List or search users assignable to issues", (user) =>
         user
           .command(

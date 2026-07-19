@@ -27,6 +27,7 @@ describe("provider-neutral MCP server", () => {
     expect(tools.tools.map((tool) => tool.name).toSorted()).toEqual([
       "apply_issue_change",
       "get_issue",
+      "get_issue_capabilities",
       "list_issues",
       "list_users",
       "prepare_issue_change",
@@ -47,6 +48,24 @@ describe("provider-neutral MCP server", () => {
           properties: {
             code: { type: "string" },
             message: { type: "string" },
+          },
+        },
+      },
+    });
+    expect(tools.tools.find((tool) => tool.name === "get_issue")?.outputSchema).toMatchObject({
+      properties: {
+        result: {
+          properties: {
+            issue: {
+              properties: {
+                assignee: { anyOf: expect.any(Array) },
+                creator: { anyOf: expect.any(Array) },
+                priority: { anyOf: expect.any(Array) },
+                issueType: { anyOf: expect.any(Array) },
+                createdAt: { anyOf: expect.any(Array) },
+                dueDate: { anyOf: expect.any(Array) },
+              },
+            },
           },
         },
       },
@@ -95,6 +114,12 @@ describe("provider-neutral MCP server", () => {
     expect(searchUsersTool?.inputSchema).toMatchObject({
       properties: { query: { type: "string", minLength: 1 } },
     });
+    const capabilitiesTool = tools.tools.find((tool) => tool.name === "get_issue_capabilities");
+    expect(capabilitiesTool?.description).toContain("exact reusable options");
+    expect(capabilitiesTool?.inputSchema).toMatchObject({
+      properties: { all: { type: "boolean" }, provider: { type: "string" } },
+    });
+    expect(capabilitiesTool?.annotations?.readOnlyHint).toBe(true);
     expect(
       tools.tools.find((tool) => tool.name === "apply_issue_change")?.annotations?.destructiveHint,
     ).toBe(true);

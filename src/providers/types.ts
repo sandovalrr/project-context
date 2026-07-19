@@ -8,6 +8,19 @@ export interface ProviderIdentity {
   scopeName: string;
 }
 
+export interface IssueUser {
+  provider: ProviderType;
+  id: string;
+  displayName: string;
+  username: string | null;
+  email: string | null;
+}
+
+export interface IssueOption {
+  value: string | number;
+  label: string;
+}
+
 export interface IssueSnapshot {
   provider: ProviderType;
   id: string;
@@ -16,6 +29,12 @@ export interface IssueSnapshot {
   description: string | null;
   status: string;
   labels: string[];
+  assignee: AssignableUser | null;
+  creator: IssueUser | null;
+  priority: IssueOption | null;
+  issueType: IssueOption | null;
+  createdAt: string | null;
+  dueDate: string | null;
   url: string;
   updatedAt: string;
   version: string;
@@ -62,6 +81,32 @@ export interface UserListResult {
   truncated: boolean;
 }
 
+export type IssueFieldName =
+  | "title"
+  | "description"
+  | "labels"
+  | "assignee"
+  | "priority"
+  | "issueType";
+
+export type IssueFieldOperation = "create" | "update";
+
+export interface IssueFieldCapability {
+  field: IssueFieldName;
+  operations: IssueFieldOperation[];
+  requiredOnCreate: boolean;
+  clearable: boolean;
+  acceptsCustomValues: boolean;
+  options: IssueOption[];
+  optionsTruncated: boolean;
+  defaultValue: string | number | null;
+  discoveryTool: "search_users" | null;
+}
+
+export interface ProviderIssueCapabilities {
+  fields: IssueFieldCapability[];
+}
+
 export interface IssueProviderAdapter {
   readonly type: ProviderType;
   identity(): Promise<ProviderIdentity>;
@@ -69,6 +114,7 @@ export interface IssueProviderAdapter {
   search(query: string, limit?: number): Promise<IssueSnapshot[]>;
   listUsers(limit?: number): Promise<UserListResult>;
   searchUsers(query: string, limit?: number): Promise<UserListResult>;
+  capabilities(): Promise<ProviderIssueCapabilities>;
   get(identifier: string): Promise<IssueSnapshot>;
   create(input: IssueCreateInput): Promise<IssueSnapshot>;
   update(identifier: string, input: IssueUpdateInput): Promise<IssueSnapshot>;
