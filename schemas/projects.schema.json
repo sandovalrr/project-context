@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["version", "providers", "projects"],
   "properties": {
-    "version": { "const": 1 },
+    "version": { "const": 2 },
     "providers": {
       "type": "object",
       "propertyNames": { "$ref": "#/$defs/alias" },
@@ -252,11 +252,30 @@
                 "properties": {
                   "state": { "type": "string", "minLength": 1 },
                   "add_labels": { "type": "array", "items": { "type": "string" } },
-                  "remove_labels": { "type": "array", "items": { "type": "string" } }
+                  "remove_labels": { "type": "array", "items": { "type": "string" } },
+                  "match": { "$ref": "#/$defs/statusMatch" }
                 }
               }
             ]
           }
+        }
+      }
+    },
+    "statusMatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "state": { "type": "string", "minLength": 1 },
+        "labels_all": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "labels_none": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
         }
       }
     },

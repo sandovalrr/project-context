@@ -1,5 +1,6 @@
 export type ProviderType = "linear" | "github" | "jira-cloud";
 export type CanonicalStatus = "open" | "in_progress" | "done" | "canceled";
+export const CANONICAL_STATUSES = ["open", "in_progress", "done", "canceled"] as const;
 
 export interface IdentityRef {
   id: string;
@@ -38,9 +39,27 @@ export interface StatusMappingObject {
   state?: string;
   add_labels?: string[];
   remove_labels?: string[];
+  match?: StatusMatchConfig;
 }
 
 export type StatusMapping = string | StatusMappingObject;
+
+export interface StatusMatchConfig {
+  state?: string;
+  labels_all?: string[];
+  labels_none?: string[];
+}
+
+export interface StatusMatch {
+  state?: string;
+  labelsAll: string[];
+  labelsNone: string[];
+}
+
+export interface CanonicalStatusFilter {
+  canonicalStatus: CanonicalStatus;
+  match: StatusMatch;
+}
 
 export interface CreatePreset {
   priority?: string | number;
@@ -107,7 +126,7 @@ export interface ProjectConfig {
 }
 
 export interface ProjectsConfig {
-  version: 1;
+  version: 2;
   providers: Record<string, ProviderProfile>;
   projects: Record<string, ProjectConfig>;
 }

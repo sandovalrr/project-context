@@ -1,6 +1,6 @@
 ---
 name: project-issues
-description: Resolve repository-specific issue context and safely read or change Linear, GitHub Issues, and Jira Cloud issues through the provider-neutral project_issues MCP server or project-context CLI. Use whenever work involves searching, reading, creating, updating, commenting on, transitioning, closing, reopening, or linking issues. Do not use for pull requests, releases, repository administration, or local Git configuration.
+description: Resolve repository-specific issue context and safely read or change Linear, GitHub Issues, and Jira Cloud issues through the provider-neutral project_issues MCP server or project-context CLI. Use whenever work involves listing, searching, reading, creating, updating, commenting on, transitioning, closing, reopening, or linking issues. Do not use for pull requests, releases, repository administration, or local Git configuration.
 ---
 
 # Project Issues
@@ -25,11 +25,13 @@ Provider selection follows this order:
 3. One unique configured identifier pattern.
 4. The configured default provider.
 
-Never infer a provider from issue wording. Never retry a failed provider operation against another provider. Search only the default provider unless the user explicitly names a provider or requests all configured providers.
+Never infer a provider from issue wording. Never retry a failed provider operation against another provider. List and search only the default provider unless the user explicitly names a provider or requests all configured providers.
 
 ## Read Issues
 
-- Use `search_issues` for search and `get_issue` for a single issue.
+- Use `list_issues` for canonical status filters, `search_issues` only for title/description text, and `get_issue` for a single issue.
+- Never simulate status filtering by searching for text such as "in progress".
+- Treat `truncated: true` as incomplete. Surface missing or ambiguous mapping errors instead of weakening the requested filter.
 - For an unconfigured repository, explain that host-local context is missing. Conversational or explicitly supplied context may support a read, but do not treat it as write authorization.
 - GitHub pull requests are outside this skill even though the GitHub Issues API can return them.
 

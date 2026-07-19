@@ -3,11 +3,27 @@ import type { JiraProjectProvider, JiraProviderProfile } from "../core/types.ts"
 import { requestJson, versionOf } from "./http.ts";
 import type {
   IssueCreateInput,
+  IssueListOptions,
+  IssueListResult,
   IssueProviderAdapter,
   IssueSnapshot,
   IssueUpdateInput,
   ProviderIdentity,
 } from "./types.ts";
+
+function jqlValue(value: string): string {
+  return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+}
+
+function jiraStatusFilter(match: NonNullable<IssueListOptions["matches"]>[number]): string {
+  const clauses = [
+    ...(match.state ? [`status = ${jqlValue(match.state)}`] : []),
+    ...match.labelsAll.map((label) => `labels = ${jqlValue(label)}`),
+    ...match.labelsNone.map((label) => `(labels != ${jqlValue(label)} OR labels is EMPTY)`),
+  ];
+
+  return clauses.length > 1 ? `(${clauses.join(" AND ")})` : (clauses[0] ?? "");
+}
 
 interface JiraIssue {
   id: string;
@@ -131,6 +147,38 @@ export class JiraCloudIssuesAdapter implements IssueProviderAdapter {
       principalName: user.emailAddress ?? user.displayName,
       scopeId: this.profile.expected_identity.site,
       scopeName: this.profile.expected_identity.site,
+    };
+  }
+
+  async list(options: IssueListOptions = {}): Promise<IssueListResult> {
+    const limit = options.limit ?? 30;
+    const matches = options.matches?.map(jiraStatusFilter).filter(Boolean) ?? [];
+    const statusFilter =
+      matches.length === 0
+        ? ""
+        : matches.length === 1
+          ? ` AND ${matches[0]}`
+          : ` AND (${matches.join(" OR ")})`;
+    const jql = `project = ${jqlValue(this.target.project.id)}${statusFilter} ORDER BY updated DESC`;
+    const data = await this.#request<{
+      issues: JiraIssue[];
+      isLast?: boolean;
+      nextPageToken?: string;
+    }>(
+      "/rest/api/3/search/jql",
+      "POST",
+      {
+        jql,
+        maxResults: limit,
+        fields: ["summary", "description", "status", "project", "updated", "labels"],
+      },
+      "read",
+    );
+    const issues = data.issues.map((issue) => this.#targetedSnapshot(issue));
+
+    return {
+      issues,
+      truncated: data.isLast === false || data.nextPageToken !== undefined,
     };
   }
 

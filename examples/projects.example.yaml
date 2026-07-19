@@ -1,4 +1,4 @@
-version: 1
+version: 2
 
 providers:
   linear-example:
@@ -62,6 +62,29 @@ projects:
             repository: inherit
           mappings:
             status:
-              open: open
-              done: closed
-
+              open:
+                state: open
+                match:
+                  state: open
+                  labels_none: [in-progress, canceled]
+              in_progress:
+                state: open
+                add_labels: [in-progress]
+                remove_labels: [canceled]
+                match:
+                  state: open
+                  labels_all: [in-progress]
+                  labels_none: [canceled]
+              done:
+                state: closed
+                remove_labels: [in-progress, canceled]
+                match:
+                  state: closed
+                  labels_none: [canceled]
+              canceled:
+                state: closed
+                add_labels: [canceled]
+                remove_labels: [in-progress]
+                match:
+                  state: closed
+                  labels_all: [canceled]

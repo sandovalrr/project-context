@@ -27,6 +27,7 @@ describe("provider-neutral MCP server", () => {
     expect(tools.tools.map((tool) => tool.name).toSorted()).toEqual([
       "apply_issue_change",
       "get_issue",
+      "list_issues",
       "prepare_issue_change",
       "resolve_project_context",
       "search_issues",
@@ -54,6 +55,19 @@ describe("provider-neutral MCP server", () => {
     const searchTool = tools.tools.find((tool) => tool.name === "search_issues");
     expect(searchTool?.description).toContain("titles and descriptions");
     expect(JSON.stringify(searchTool?.inputSchema)).toContain("not a status or structured filter");
+    const listTool = tools.tools.find((tool) => tool.name === "list_issues");
+    expect(listTool?.description).toContain("canonical status");
+    expect(listTool?.inputSchema).toMatchObject({
+      properties: {
+        statuses: {
+          type: "array",
+          items: { enum: ["open", "in_progress", "done", "canceled"] },
+        },
+        all: { type: "boolean" },
+        limit: { type: "integer", minimum: 1, maximum: 100 },
+      },
+    });
+    expect(listTool?.annotations?.readOnlyHint).toBe(true);
     expect(
       tools.tools.find((tool) => tool.name === "apply_issue_change")?.annotations?.destructiveHint,
     ).toBe(true);

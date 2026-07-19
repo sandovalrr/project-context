@@ -28,9 +28,14 @@ resolver, or hidden terminal entry.
 Validate before connecting an agent:
 
 ```sh
+npx -y --package="@sandovalrr/project-context-mcp@$VERSION" project-context config migrate
 npx -y --package="@sandovalrr/project-context-mcp@$VERSION" project-context config validate
 npx -y --package="@sandovalrr/project-context-mcp@$VERSION" project-context doctor
 ```
+
+If migration reports pending files, review the preview and rerun it with
+`--apply`. Existing files are backed up before the project registry is upgraded
+to schema version 2; credentials remain on schema version 1.
 
 ## Shared stdio definition
 

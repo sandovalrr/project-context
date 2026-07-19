@@ -4,6 +4,7 @@ Use these commands only when the provider-neutral MCP server is unavailable.
 
 ```text
 project-context resolve --cwd <path>
+project-context issue list [--status <canonical-status> ...] [--provider <alias> | --all]
 project-context issue search <query> [--provider <alias> | --all]
 project-context issue get <reference> [--provider <alias>]
 project-context issue prepare create --title <title> [--description <text>] [--preset <name>]

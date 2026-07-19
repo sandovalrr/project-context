@@ -29,14 +29,18 @@
 - Search, direct lookup, and mutation revalidation reject issues outside the
   configured project target.
 - Canonical state mappings resolve to one uniquely named available transition.
-- Jira Server and Data Center are unsupported in schema version 1.
+- Jira Server and Data Center are unsupported.
 
 ## Shared operations
 
-Adapters expose provider-neutral read/search, create, update, comment,
+Adapters expose provider-neutral list/read/search, create, update, comment,
 transition, close/reopen, and related-link operations where the provider
 supports them. Permanent deletion is never exposed. Unsupported native features
 produce a capability error rather than an approximation.
 
 `search_issues` accepts title/description text. It is not a status or structured
-filter; workflow filtering requires a separate future capability.
+filter. `list_issues` accepts optional canonical status filters, returns both
+the provider-native `status` and normalized `canonicalStatus`, and orders each
+provider group by most recently updated. Omitted statuses list all workflow
+states; unclassifiable results have `canonicalStatus: null`. Each group reports
+`truncated` when more results exist beyond its per-provider limit.

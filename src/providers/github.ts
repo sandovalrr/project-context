@@ -3,11 +3,35 @@ import type { GitHubProjectProvider, GitHubProviderProfile } from "../core/types
 import { requestJson, versionOf } from "./http.ts";
 import type {
   IssueCreateInput,
+  IssueListOptions,
+  IssueListResult,
   IssueProviderAdapter,
   IssueSnapshot,
   IssueUpdateInput,
   ProviderIdentity,
 } from "./types.ts";
+
+function quotedQualifier(name: string, value: string, negative = false): string {
+  const escaped = value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+
+  return `${negative ? "-" : ""}${name}:"${escaped}"`;
+}
+
+function statusQuery(match: NonNullable<IssueListOptions["matches"]>[number]): string {
+  if (match.state && !["open", "closed"].includes(match.state.toLowerCase())) {
+    throw new ProjectContextError(
+      "GITHUB_STATUS_FILTER_INVALID",
+      `GitHub status filters support only open or closed, not ${match.state}`,
+    );
+  }
+  const qualifiers = [
+    ...(match.state ? [`is:${match.state.toLowerCase()}`] : []),
+    ...match.labelsAll.map((label) => quotedQualifier("label", label)),
+    ...match.labelsNone.map((label) => quotedQualifier("label", label, true)),
+  ];
+
+  return qualifiers.join(" AND ");
+}
 
 interface GitHubIssue {
   id: number;
@@ -95,6 +119,33 @@ export class GitHubIssuesAdapter implements IssueProviderAdapter {
       scopeId: this.profile.expected_identity.host,
       scopeName: this.profile.expected_identity.host,
     };
+  }
+
+  async list(options: IssueListOptions = {}): Promise<IssueListResult> {
+    const limit = options.limit ?? 30;
+    const filters = options.matches?.map(statusQuery).filter(Boolean) ?? [];
+    const statusFilter =
+      filters.length === 0
+        ? ""
+        : filters.length === 1
+          ? ` ${filters[0]}`
+          : ` (${filters.join(" OR ")})`;
+    const query = `repo:${this.#repository.owner}/${this.#repository.name} is:issue${statusFilter}`;
+    const parameters = new URLSearchParams({
+      q: query,
+      sort: "updated",
+      order: "desc",
+      per_page: String(limit),
+    });
+    const result = await this.#request<{ total_count: number; items: GitHubIssue[] }>(
+      `/search/issues?${parameters}`,
+    );
+    const issues = result.items
+      .filter((issue) => !issue.pull_request)
+      .slice(0, limit)
+      .map((issue) => this.#snapshot(issue));
+
+    return { issues, truncated: result.total_count > issues.length };
   }
 
   async search(query: string, limit = 30): Promise<IssueSnapshot[]> {

@@ -25,7 +25,7 @@ describe("configuration", () => {
     const projects = await loadProjectsConfig("examples/projects.example.yaml");
     const credentials = await loadCredentialConfig("examples/credentials.example.yaml");
 
-    expect(projects.version).toBe(1);
+    expect(projects.version).toBe(2);
     expect(credentials.version).toBe(1);
     expect(() => validateRegistryReferences(projects, credentials)).not.toThrow();
   });
@@ -37,7 +37,7 @@ describe("configuration", () => {
     await writeFile(
       path,
       [
-        "version: 1",
+        "version: 2",
         "providers:",
         "  github-acme:",
         "    type: github",
@@ -72,6 +72,29 @@ describe("configuration", () => {
 
     expect(() => validateRegistryReferences(projects, credentials)).toThrow("type does not match");
   });
+
+  test("directs older project registries to the explicit migration command", async () => {
+    await withTemporaryDirectory("project-context-old-config-", async (directory) => {
+      const path = join(directory, "projects.yaml");
+      await writeFile(path, "version: 1\nproviders: {}\nprojects: {}\n");
+
+      await expect(loadProjectsConfig(path)).rejects.toMatchObject({
+        code: "CONFIG_MIGRATION_REQUIRED",
+      });
+      await expect(loadProjectsConfig(path)).rejects.toThrow("project-context config migrate");
+    });
+  });
+
+  test("rejects project registries from a future schema with a stable error", async () => {
+    await withTemporaryDirectory("project-context-new-config-", async (directory) => {
+      const path = join(directory, "projects.yaml");
+      await writeFile(path, "version: 3\nproviders: {}\nprojects: {}\n");
+
+      await expect(loadProjectsConfig(path)).rejects.toMatchObject({
+        code: "CONFIG_VERSION_NEWER",
+      });
+    });
+  });
 });
 
 describe("setupHostConfiguration", () => {
@@ -86,7 +109,7 @@ describe("setupHostConfiguration", () => {
 
     await writeFile(
       getPaths().projectsFile,
-      "version: 1\nproviders: {}\nprojects: {}\n# keep-me\n",
+      "version: 2\nproviders: {}\nprojects: {}\n# keep-me\n",
     );
     const second = await setupHostConfiguration();
 
@@ -154,7 +177,7 @@ describe("configuration migrations", () => {
       const applied = await migrateHostConfiguration({ apply: true });
       expect(applied).toMatchObject({ needed: true, applied: true });
       expect(applied.backups).toHaveLength(2);
-      expect((await loadProjectsConfig(getPaths().projectsFile)).version).toBe(1);
+      expect((await loadProjectsConfig(getPaths().projectsFile)).version).toBe(2);
       expect((await loadCredentialConfig(getPaths().credentialsFile)).version).toBe(1);
       const backupMetadata = await Promise.all((applied.backups ?? []).map((path) => stat(path)));
       expect(backupMetadata.every((metadata) => metadata.isFile())).toBe(true);
@@ -169,7 +192,7 @@ describe("configuration migrations", () => {
       await Promise.all([
         writeFile(
           join(process.env.PROJECT_CONTEXT_CONFIG_DIR, "projects.yaml"),
-          "version: 2\nproviders: {}\nprojects: {}\n",
+          "version: 3\nproviders: {}\nprojects: {}\n",
           { mode: 0o600 },
         ),
         writeFile(
@@ -179,7 +202,40 @@ describe("configuration migrations", () => {
         ),
       ]);
 
-      await expect(migrateHostConfiguration()).rejects.toThrow("future schema version 2");
+      await expect(migrateHostConfiguration()).rejects.toThrow("future schema version 3");
+    });
+  });
+
+  test("migrates only the projects registry from v1 to v2", async () => {
+    await withTemporaryDirectory("project-context-migration-", async (directory) => {
+      process.env.PROJECT_CONTEXT_CONFIG_DIR = join(directory, "config");
+      process.env.PROJECT_CONTEXT_STATE_DIR = join(directory, "state");
+      await mkdir(process.env.PROJECT_CONTEXT_CONFIG_DIR, { recursive: true, mode: 0o700 });
+      await Promise.all([
+        writeFile(
+          join(process.env.PROJECT_CONTEXT_CONFIG_DIR, "projects.yaml"),
+          "version: 1\nproviders: {}\nprojects: {}\n",
+          { mode: 0o600 },
+        ),
+        writeFile(
+          join(process.env.PROJECT_CONTEXT_CONFIG_DIR, "credentials.yaml"),
+          "version: 1\ncredentials: {}\n",
+          { mode: 0o600 },
+        ),
+      ]);
+
+      const preview = await migrateHostConfiguration();
+      expect(preview.files).toEqual([
+        {
+          path: getPaths().projectsFile,
+          from_version: 1,
+          to_version: 2,
+        },
+      ]);
+
+      await migrateHostConfiguration({ apply: true });
+      expect((await loadProjectsConfig(getPaths().projectsFile)).version).toBe(2);
+      expect((await loadCredentialConfig(getPaths().credentialsFile)).version).toBe(1);
     });
   });
 });

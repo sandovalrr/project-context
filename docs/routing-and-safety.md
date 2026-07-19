@@ -16,6 +16,9 @@ is configured for the repository.
 
 Normal searches use the default provider. Searching all configured providers
 must be explicit and results retain provider-qualified identifiers.
+Status-filtered lists follow the same routing rules. `all: true` applies the
+limit separately to every provider and fails as a whole if any provider cannot
+honor the canonical filter.
 
 Provider routing is not sufficient by itself: Linear direct lookups must match
 the configured team and explicit/no-project target, and Jira direct lookups
@@ -52,9 +55,11 @@ canceled
 ```
 
 Project configuration maps those intents to provider-native states or labels.
-Version one requires an explicit mapping and fails closed when it is absent.
-GitHub has no native `in_progress` state, so it requires an explicit label
-mapping.
+Schema version 2 optionally adds a provider-neutral `match` predicate with
+`state`, `labels_all`, and `labels_none` for read-side classification. Simple
+status strings and transition objects derive a match automatically. Missing or
+overlapping requested mappings fail closed. GitHub has no native `in_progress`
+state, so it requires explicit label actions and mutually exclusive matches.
 
 Creating an issue without a requested state uses the provider's normal default.
 
