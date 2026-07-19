@@ -1,12 +1,14 @@
 import { ProjectContextError } from "../core/errors.ts";
 import type { LinearProjectProvider, LinearProviderProfile } from "../core/types.ts";
-import { issueFieldCapability } from "./capabilities.ts";
+import { filterIssueOptions, issueFieldCapability } from "./capabilities.ts";
 import { requestJson, versionOf } from "./http.ts";
 import type {
   AssignableUser,
   IssueCreateInput,
   IssueListOptions,
   IssueListResult,
+  IssueOptionField,
+  IssueOptionListResult,
   IssueProviderAdapter,
   IssueSnapshot,
   IssueUpdateInput,
@@ -395,6 +397,49 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
     return this.#users(query, limit);
   }
 
+  async searchOptions(
+    field: IssueOptionField,
+    query: string,
+    limit = 30,
+  ): Promise<IssueOptionListResult> {
+    if (field === "priority") return filterIssueOptions(linearPriorities, query, limit);
+    if (field !== "labels") {
+      throw new ProjectContextError(
+        "ISSUE_OPTION_FIELD_UNSUPPORTED",
+        `Linear does not expose searchable ${field} options`,
+      );
+    }
+    const data = await this.#graphql<{
+      issueLabels: {
+        nodes: Array<{ id: string; name: string }>;
+        pageInfo: { hasNextPage: boolean };
+      };
+    }>(
+      `query SearchOptions($teamId: ID!, $query: String!, $first: Int!) {
+        issueLabels(
+          filter: {
+            team: { id: { eq: $teamId } }
+            name: { containsIgnoreCase: $query }
+          }
+          first: $first
+        ) {
+          nodes { id name }
+          pageInfo { hasNextPage }
+        }
+      }`,
+      { teamId: this.target.team.id, query, first: limit + 1 },
+    );
+    const options = data.issueLabels.nodes.map((label) => ({
+      value: label.name,
+      label: label.name,
+    }));
+
+    return {
+      options: options.slice(0, limit),
+      truncated: data.issueLabels.pageInfo.hasNextPage || options.length > limit,
+    };
+  }
+
   async capabilities(): Promise<ProviderIssueCapabilities> {
     const labelResult = await this.#capabilityLabels();
 
@@ -405,6 +450,7 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
         issueFieldCapability("labels", ["create", "update"], {
           options: labelResult.labels.map((label) => ({ value: label.name, label: label.name })),
           optionsTruncated: labelResult.truncated,
+          discoveryTool: "search_issue_options",
         }),
         issueFieldCapability("assignee", ["create", "update"], {
           clearable: true,
@@ -414,6 +460,7 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
           options: linearPriorities,
           defaultValue: 0,
           clearable: true,
+          discoveryTool: "search_issue_options",
         }),
         issueFieldCapability("issueType", []),
       ],

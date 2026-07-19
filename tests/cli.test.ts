@@ -42,6 +42,12 @@ describe("CLI usability", () => {
     expect(capabilities.exitCode).toBe(0);
     expect(capabilities.stdout.toString()).toContain("--provider");
     expect(capabilities.stdout.toString()).toContain("--all");
+
+    const options = cli("issue", "option", "search", "--help");
+    expect(options.exitCode).toBe(0);
+    expect(options.stdout.toString()).toContain("<field>");
+    expect(options.stdout.toString()).toContain("<query>");
+    expect(options.stdout.toString()).toContain("--limit");
   });
 
   test("rejects conflicting options as machine-readable JSON", () => {

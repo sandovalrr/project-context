@@ -1,12 +1,15 @@
 import { ProjectContextError } from "../core/errors.ts";
 import type { JiraProjectProvider, JiraProviderProfile } from "../core/types.ts";
-import { issueFieldCapability } from "./capabilities.ts";
+import { filterIssueOptions, issueFieldCapability } from "./capabilities.ts";
 import { requestJson, versionOf } from "./http.ts";
 import type {
   AssignableUser,
   IssueCreateInput,
   IssueListOptions,
   IssueListResult,
+  IssueOption,
+  IssueOptionField,
+  IssueOptionListResult,
   IssueProviderAdapter,
   IssueSnapshot,
   IssueUpdateInput,
@@ -85,6 +88,8 @@ interface JiraPriority {
   id: string;
   name: string;
 }
+
+const jiraOptionSearchMaxPages = 10;
 
 function adf(text: string) {
   return {
@@ -199,8 +204,8 @@ export class JiraCloudIssuesAdapter implements IssueProviderAdapter {
     };
   }
 
-  async #issueTypes(): Promise<{ issueTypes: JiraIssueType[]; truncated: boolean }> {
-    const parameters = new URLSearchParams({ maxResults: "100", startAt: "0" });
+  async #issueTypes(startAt = 0): Promise<{ issueTypes: JiraIssueType[]; truncated: boolean }> {
+    const parameters = new URLSearchParams({ maxResults: "100", startAt: String(startAt) });
     const page = await this.#request<{
       issueTypes: JiraIssueType[];
       total: number;
@@ -210,15 +215,15 @@ export class JiraCloudIssuesAdapter implements IssueProviderAdapter {
 
     return {
       issueTypes: page.issueTypes,
-      truncated: page.total > page.issueTypes.length,
+      truncated: startAt + page.issueTypes.length < page.total,
     };
   }
 
-  async #priorities(): Promise<{ priorities: JiraPriority[]; truncated: boolean }> {
+  async #priorities(startAt = 0): Promise<{ priorities: JiraPriority[]; truncated: boolean }> {
     const parameters = new URLSearchParams({
       projectId: this.target.project.id,
       maxResults: "100",
-      startAt: "0",
+      startAt: String(startAt),
     });
     const page = await this.#request<{
       values: JiraPriority[];
@@ -229,6 +234,72 @@ export class JiraCloudIssuesAdapter implements IssueProviderAdapter {
       priorities: page.values,
       truncated: page.isLast === false,
     };
+  }
+
+  async #searchIssueTypes(
+    query: string,
+    limit: number,
+    startAt = 0,
+    pageNumber = 1,
+    collected: IssueOption[] = [],
+  ): Promise<IssueOptionListResult> {
+    const page = await this.#issueTypes(startAt);
+    const options = [
+      ...collected,
+      ...page.issueTypes
+        .filter((issueType) => !issueType.subtask)
+        .map((issueType) => ({ value: issueType.name, label: issueType.name })),
+    ];
+    const filtered = filterIssueOptions(options, query, limit);
+    const pageBoundReached = pageNumber >= jiraOptionSearchMaxPages;
+    const noProgress = page.issueTypes.length === 0;
+
+    if (filtered.truncated || !page.truncated || pageBoundReached || noProgress) {
+      return {
+        options: filtered.options,
+        truncated: filtered.truncated || (page.truncated && (pageBoundReached || noProgress)),
+      };
+    }
+
+    return this.#searchIssueTypes(
+      query,
+      limit,
+      startAt + page.issueTypes.length,
+      pageNumber + 1,
+      options,
+    );
+  }
+
+  async #searchPriorities(
+    query: string,
+    limit: number,
+    startAt = 0,
+    pageNumber = 1,
+    collected: IssueOption[] = [],
+  ): Promise<IssueOptionListResult> {
+    const page = await this.#priorities(startAt);
+    const options = [
+      ...collected,
+      ...page.priorities.map((priority) => ({ value: priority.name, label: priority.name })),
+    ];
+    const filtered = filterIssueOptions(options, query, limit);
+    const pageBoundReached = pageNumber >= jiraOptionSearchMaxPages;
+    const noProgress = page.priorities.length === 0;
+
+    if (filtered.truncated || !page.truncated || pageBoundReached || noProgress) {
+      return {
+        options: filtered.options,
+        truncated: filtered.truncated || (page.truncated && (pageBoundReached || noProgress)),
+      };
+    }
+
+    return this.#searchPriorities(
+      query,
+      limit,
+      startAt + page.priorities.length,
+      pageNumber + 1,
+      options,
+    );
   }
 
   async #collectAssignableUsers(
@@ -346,6 +417,20 @@ export class JiraCloudIssuesAdapter implements IssueProviderAdapter {
     return this.#users(query, limit);
   }
 
+  async searchOptions(
+    field: IssueOptionField,
+    query: string,
+    limit = 30,
+  ): Promise<IssueOptionListResult> {
+    if (field === "priority") return this.#searchPriorities(query, limit);
+    if (field === "issueType") return this.#searchIssueTypes(query, limit);
+
+    throw new ProjectContextError(
+      "ISSUE_OPTION_FIELD_UNSUPPORTED",
+      "Jira labels accept custom values but its label catalog is not project-scoped",
+    );
+  }
+
   async capabilities(): Promise<ProviderIssueCapabilities> {
     const [issueTypeResult, priorityResult] = await Promise.all([
       this.#issueTypes(),
@@ -369,6 +454,7 @@ export class JiraCloudIssuesAdapter implements IssueProviderAdapter {
             label: priority.name,
           })),
           optionsTruncated: priorityResult.truncated,
+          discoveryTool: "search_issue_options",
         }),
         issueFieldCapability("issueType", ["create"], {
           defaultValue: "Task",
@@ -376,6 +462,7 @@ export class JiraCloudIssuesAdapter implements IssueProviderAdapter {
             .filter((issueType) => !issueType.subtask)
             .map((issueType) => ({ value: issueType.name, label: issueType.name })),
           optionsTruncated: issueTypeResult.truncated,
+          discoveryTool: "search_issue_options",
         }),
       ],
     };

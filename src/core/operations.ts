@@ -10,6 +10,8 @@ import type {
   IssueCreateInput,
   IssueFieldCapability,
   IssueFieldName,
+  IssueOption,
+  IssueOptionField,
   IssueProviderAdapter,
   IssueSnapshot,
   IssueUpdateInput,
@@ -662,6 +664,104 @@ export function searchUsers(
   }
 
   return discoverUsers(normalizedQuery, options);
+}
+
+export interface IssueOptionSearchGroup {
+  providerAlias: string;
+  providerType: ProviderType;
+  field: IssueOptionField;
+  options: IssueOption[];
+  truncated: boolean;
+}
+
+interface IssueOptionSearchOptions {
+  cwd?: string;
+  provider?: string;
+  all?: boolean;
+  limit?: number;
+  fetcher?: typeof fetch;
+}
+
+function validateIssueOptionSearch(options: IssueOptionSearchOptions): void {
+  if (options.all && options.provider) {
+    throw new ProjectContextError("ROUTING_CONFLICT", "Use either --provider or --all, not both");
+  }
+  if (
+    options.limit !== undefined &&
+    (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > 100)
+  ) {
+    throw new ProjectContextError(
+      "LIMIT_INVALID",
+      "Issue option search limit must be between 1 and 100",
+    );
+  }
+}
+
+async function searchOptionsFromRuntime(
+  current: OperationRuntime,
+  field: IssueOptionField,
+  query: string,
+  limit: number | undefined,
+): Promise<IssueOptionSearchGroup> {
+  const result = await current.adapter.searchOptions(field, query, limit);
+
+  return {
+    providerAlias: current.providerAlias,
+    providerType: current.provider.type,
+    field,
+    options: result.options,
+    truncated: result.truncated,
+  };
+}
+
+export async function searchIssueOptions(
+  field: IssueOptionField,
+  query: string,
+  options: IssueOptionSearchOptions = {},
+): Promise<IssueOptionSearchGroup[]> {
+  const normalizedQuery = query.trim();
+  if (!normalizedQuery) {
+    throw new ProjectContextError(
+      "ISSUE_OPTION_QUERY_REQUIRED",
+      "Issue option search query cannot be empty",
+    );
+  }
+  validateIssueOptionSearch(options);
+  const cwd = options.cwd ?? process.cwd();
+  const runtimeOptions = {
+    ...(options.provider ? { explicitProvider: options.provider } : {}),
+    ...(options.fetcher ? { fetcher: options.fetcher } : {}),
+  };
+
+  if (!options.all) {
+    return [
+      await searchOptionsFromRuntime(
+        await runtime(cwd, runtimeOptions),
+        field,
+        normalizedQuery,
+        options.limit,
+      ),
+    ];
+  }
+
+  const paths = getPaths();
+  const projects = await loadProjectsConfig(paths.projectsFile);
+  const repository = await resolveRepository(projects, cwd);
+  const aliases = Object.keys(repository.project.issues.providers);
+
+  return Promise.all(
+    aliases.map(async (alias) =>
+      searchOptionsFromRuntime(
+        await runtime(cwd, {
+          explicitProvider: alias,
+          ...(options.fetcher ? { fetcher: options.fetcher } : {}),
+        }),
+        field,
+        normalizedQuery,
+        options.limit,
+      ),
+    ),
+  );
 }
 
 export interface IssueCreatePresetCapability {

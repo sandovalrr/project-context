@@ -1,4 +1,32 @@
-import type { IssueFieldCapability, IssueFieldName, IssueFieldOperation } from "./types.ts";
+import type {
+  IssueFieldCapability,
+  IssueFieldName,
+  IssueFieldOperation,
+  IssueOption,
+  IssueOptionListResult,
+} from "./types.ts";
+
+function normalized(value: string | number): string {
+  return String(value).trim().toLocaleLowerCase();
+}
+
+export function filterIssueOptions(
+  options: IssueOption[],
+  query: string,
+  limit: number,
+): IssueOptionListResult {
+  const normalizedQuery = normalized(query);
+  const matches = options.filter(
+    (option) =>
+      normalized(option.label).includes(normalizedQuery) ||
+      normalized(option.value).includes(normalizedQuery),
+  );
+
+  return {
+    options: matches.slice(0, limit),
+    truncated: matches.length > limit,
+  };
+}
 
 export function issueFieldCapability(
   field: IssueFieldName,

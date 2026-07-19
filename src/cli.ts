@@ -25,6 +25,7 @@ import {
   listIssues,
   listUsers,
   prepareIssueOperation,
+  searchIssueOptions,
   searchIssues,
   searchUsers,
 } from "./core/operations.ts";
@@ -37,6 +38,8 @@ import { statusFilterWarnings } from "./core/status.ts";
 import { CANONICAL_STATUSES, type CanonicalStatus } from "./core/types.ts";
 import { startProjectIssuesStdioServer } from "./mcp.ts";
 import { PACKAGE_VERSION } from "./metadata.ts";
+
+const issueOptionFields = ["labels", "priority", "issueType"] as const;
 
 interface OutputOptions {
   json?: boolean;
@@ -390,6 +393,50 @@ const cli = yargs(hideBin(process.argv))
             }),
             argv,
           ),
+      )
+      .command("option", "Search reusable issue field options", (option) =>
+        option
+          .command(
+            "search <field> <query>",
+            "Search target-scoped labels, priorities, or issue types",
+            (command) =>
+              command
+                .positional("field", {
+                  type: "string",
+                  choices: issueOptionFields,
+                  demandOption: true,
+                })
+                .positional("query", { type: "string", demandOption: true })
+                .option("all", {
+                  type: "boolean",
+                  default: false,
+                  description: "Search all configured providers",
+                })
+                .option("limit", {
+                  type: "number",
+                  default: 30,
+                  description: "Maximum results per provider",
+                })
+                .conflicts("all", "provider")
+                .check((argv) => {
+                  if (!Number.isInteger(argv.limit) || argv.limit < 1 || argv.limit > 100) {
+                    throw new Error("--limit must be an integer between 1 and 100");
+                  }
+                  return true;
+                }),
+            async (argv) =>
+              print(
+                await searchIssueOptions(argv.field, argv.query, {
+                  cwd: argv.cwd ?? process.cwd(),
+                  ...(argv.provider ? { provider: argv.provider } : {}),
+                  all: argv.all,
+                  limit: argv.limit,
+                }),
+                argv,
+              ),
+          )
+          .demandCommand(1, "Choose search")
+          .strictCommands(),
       )
       .command("user", "List or search users assignable to issues", (user) =>
         user

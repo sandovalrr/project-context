@@ -7,6 +7,7 @@ project-context resolve --cwd <path>
 project-context issue list [--status <canonical-status> ...] [--provider <alias> | --all]
 project-context issue search <query> [--provider <alias> | --all]
 project-context issue capabilities [--provider <alias> | --all]
+project-context issue option search <labels|priority|issueType> <query> [--provider <alias> | --all]
 project-context issue user list [--provider <alias> | --all]
 project-context issue user search <query> [--provider <alias> | --all]
 project-context issue get <reference> [--provider <alias>]

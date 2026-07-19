@@ -21,6 +21,13 @@ export interface IssueOption {
   label: string;
 }
 
+export type IssueOptionField = "labels" | "priority" | "issueType";
+
+export interface IssueOptionListResult {
+  options: IssueOption[];
+  truncated: boolean;
+}
+
 export interface IssueSnapshot {
   provider: ProviderType;
   id: string;
@@ -100,7 +107,7 @@ export interface IssueFieldCapability {
   options: IssueOption[];
   optionsTruncated: boolean;
   defaultValue: string | number | null;
-  discoveryTool: "search_users" | null;
+  discoveryTool: "search_users" | "search_issue_options" | null;
 }
 
 export interface ProviderIssueCapabilities {
@@ -114,6 +121,11 @@ export interface IssueProviderAdapter {
   search(query: string, limit?: number): Promise<IssueSnapshot[]>;
   listUsers(limit?: number): Promise<UserListResult>;
   searchUsers(query: string, limit?: number): Promise<UserListResult>;
+  searchOptions(
+    field: IssueOptionField,
+    query: string,
+    limit?: number,
+  ): Promise<IssueOptionListResult>;
   capabilities(): Promise<ProviderIssueCapabilities>;
   get(identifier: string): Promise<IssueSnapshot>;
   create(input: IssueCreateInput): Promise<IssueSnapshot>;

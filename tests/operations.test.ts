@@ -7,6 +7,7 @@ import {
   listIssues,
   listUsers,
   prepareIssueOperation,
+  searchIssueOptions,
   searchUsers,
 } from "../src/core/operations.ts";
 import { getPaths } from "../src/core/paths.ts";
@@ -313,6 +314,48 @@ describe("issue capabilities", () => {
   test("rejects conflicting provider routing", async () => {
     await expect(getIssueCapabilities({ all: true, provider: "github" })).rejects.toMatchObject({
       code: "ROUTING_CONFLICT",
+    });
+  });
+});
+
+describe("issue option discovery", () => {
+  test("searches normalized options through the routed provider", async () => {
+    await withFixture(async (repository) => {
+      const fetcher = mockFetch([
+        { id: 1, login: "example-user" },
+        [
+          { id: 1, name: "triage" },
+          { id: 2, name: "triage-needed" },
+        ],
+      ]);
+
+      expect(
+        await searchIssueOptions("labels", "triage", {
+          cwd: repository,
+          limit: 1,
+          fetcher,
+        }),
+      ).toEqual([
+        {
+          providerAlias: "github",
+          providerType: "github",
+          field: "labels",
+          options: [{ value: "triage", label: "triage" }],
+          truncated: true,
+        },
+      ]);
+    });
+  });
+
+  test("rejects empty queries, conflicting routing, and invalid limits", async () => {
+    await expect(searchIssueOptions("labels", "  ")).rejects.toMatchObject({
+      code: "ISSUE_OPTION_QUERY_REQUIRED",
+    });
+    await expect(
+      searchIssueOptions("labels", "bug", { all: true, provider: "github" }),
+    ).rejects.toMatchObject({ code: "ROUTING_CONFLICT" });
+    await expect(searchIssueOptions("labels", "bug", { limit: 101 })).rejects.toMatchObject({
+      code: "LIMIT_INVALID",
     });
   });
 });
