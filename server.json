@@ -3,7 +3,7 @@
   "name": "io.github.sandovalrr/project-context",
   "title": "Project Context",
   "description": "Safely manage repository-scoped issues across Linear, GitHub Issues, and Jira Cloud.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "websiteUrl": "https://github.com/sandovalrr/project-context",
   "repository": {
     "url": "https://github.com/sandovalrr/project-context",
@@ -14,7 +14,7 @@
     {
       "registryType": "npm",
       "identifier": "@sandovalrr/project-context-mcp",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "transport": {
         "type": "stdio"
       },
