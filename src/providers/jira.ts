@@ -1,5 +1,6 @@
 import { ProjectContextError } from "../core/errors.ts";
 import type { JiraProjectProvider, JiraProviderProfile } from "../core/types.ts";
+import { issueFieldCapability } from "./capabilities.ts";
 import { requestJson, versionOf } from "./http.ts";
 import type {
   AssignableUser,
@@ -9,7 +10,9 @@ import type {
   IssueProviderAdapter,
   IssueSnapshot,
   IssueUpdateInput,
+  IssueUser,
   ProviderIdentity,
+  ProviderIssueCapabilities,
   UserListResult,
 } from "./types.ts";
 
@@ -27,6 +30,27 @@ function jiraStatusFilter(match: NonNullable<IssueListOptions["matches"]>[number
   return clauses.length > 1 ? `(${clauses.join(" AND ")})` : (clauses[0] ?? "");
 }
 
+const jiraIssueFields = [
+  "summary",
+  "description",
+  "status",
+  "project",
+  "updated",
+  "labels",
+  "assignee",
+  "creator",
+  "priority",
+  "issuetype",
+  "created",
+  "duedate",
+];
+
+interface JiraUser {
+  accountId: string;
+  displayName: string;
+  emailAddress?: string;
+}
+
 interface JiraIssue {
   id: string;
   key: string;
@@ -37,15 +61,29 @@ interface JiraIssue {
     status: { name: string };
     project?: { id: string };
     updated: string;
+    created?: string;
+    duedate?: string | null;
+    assignee?: JiraAssignableUser | null;
+    creator?: JiraUser | null;
+    priority?: { id: string; name: string } | null;
+    issuetype?: { id: string; name: string } | null;
     labels?: string[];
   };
 }
 
-interface JiraAssignableUser {
-  accountId: string;
-  displayName: string;
-  emailAddress?: string;
+interface JiraAssignableUser extends JiraUser {
   active: boolean;
+}
+
+interface JiraIssueType {
+  id: string;
+  name: string;
+  subtask: boolean;
+}
+
+interface JiraPriority {
+  id: string;
+  name: string;
 }
 
 function adf(text: string) {
@@ -124,6 +162,16 @@ export class JiraCloudIssuesAdapter implements IssueProviderAdapter {
       description: adfText(issue.fields.description),
       status: issue.fields.status.name,
       labels: issue.fields.labels ?? [],
+      assignee: issue.fields.assignee ? this.#assignableUser(issue.fields.assignee) : null,
+      creator: issue.fields.creator ? this.#issueUser(issue.fields.creator) : null,
+      priority: issue.fields.priority
+        ? { value: issue.fields.priority.name, label: issue.fields.priority.name }
+        : null,
+      issueType: issue.fields.issuetype
+        ? { value: issue.fields.issuetype.name, label: issue.fields.issuetype.name }
+        : null,
+      createdAt: issue.fields.created ?? null,
+      dueDate: issue.fields.duedate ?? null,
       url: `${this.#baseUrl}/browse/${issue.key}`,
       updatedAt: issue.fields.updated,
       version: versionOf(issue.fields.updated, issue.id),
@@ -138,6 +186,48 @@ export class JiraCloudIssuesAdapter implements IssueProviderAdapter {
       username: null,
       email: user.emailAddress ?? null,
       active: user.active,
+    };
+  }
+
+  #issueUser(user: JiraUser): IssueUser {
+    return {
+      provider: this.type,
+      id: user.accountId,
+      displayName: user.displayName,
+      username: null,
+      email: user.emailAddress ?? null,
+    };
+  }
+
+  async #issueTypes(): Promise<{ issueTypes: JiraIssueType[]; truncated: boolean }> {
+    const parameters = new URLSearchParams({ maxResults: "100", startAt: "0" });
+    const page = await this.#request<{
+      issueTypes: JiraIssueType[];
+      total: number;
+    }>(
+      `/rest/api/3/issue/createmeta/${encodeURIComponent(this.target.project.id)}/issuetypes?${parameters}`,
+    );
+
+    return {
+      issueTypes: page.issueTypes,
+      truncated: page.total > page.issueTypes.length,
+    };
+  }
+
+  async #priorities(): Promise<{ priorities: JiraPriority[]; truncated: boolean }> {
+    const parameters = new URLSearchParams({
+      projectId: this.target.project.id,
+      maxResults: "100",
+      startAt: "0",
+    });
+    const page = await this.#request<{
+      values: JiraPriority[];
+      isLast?: boolean;
+    }>(`/rest/api/3/priority/search?${parameters}`);
+
+    return {
+      priorities: page.values,
+      truncated: page.isLast === false,
     };
   }
 
@@ -221,7 +311,7 @@ export class JiraCloudIssuesAdapter implements IssueProviderAdapter {
       {
         jql,
         maxResults: limit,
-        fields: ["summary", "description", "status", "project", "updated", "labels"],
+        fields: jiraIssueFields,
       },
       "read",
     );
@@ -241,7 +331,7 @@ export class JiraCloudIssuesAdapter implements IssueProviderAdapter {
       {
         jql,
         maxResults: limit,
-        fields: ["summary", "description", "status", "project", "updated", "labels"],
+        fields: jiraIssueFields,
       },
       "read",
     );
@@ -256,10 +346,45 @@ export class JiraCloudIssuesAdapter implements IssueProviderAdapter {
     return this.#users(query, limit);
   }
 
+  async capabilities(): Promise<ProviderIssueCapabilities> {
+    const [issueTypeResult, priorityResult] = await Promise.all([
+      this.#issueTypes(),
+      this.#priorities(),
+    ]);
+
+    return {
+      fields: [
+        issueFieldCapability("title", ["create", "update"]),
+        issueFieldCapability("description", ["create", "update"]),
+        issueFieldCapability("labels", ["create", "update"], {
+          acceptsCustomValues: true,
+        }),
+        issueFieldCapability("assignee", ["create", "update"], {
+          clearable: true,
+          discoveryTool: "search_users",
+        }),
+        issueFieldCapability("priority", ["create", "update"], {
+          options: priorityResult.priorities.map((priority) => ({
+            value: priority.name,
+            label: priority.name,
+          })),
+          optionsTruncated: priorityResult.truncated,
+        }),
+        issueFieldCapability("issueType", ["create"], {
+          defaultValue: "Task",
+          options: issueTypeResult.issueTypes
+            .filter((issueType) => !issueType.subtask)
+            .map((issueType) => ({ value: issueType.name, label: issueType.name })),
+          optionsTruncated: issueTypeResult.truncated,
+        }),
+      ],
+    };
+  }
+
   async get(identifier: string): Promise<IssueSnapshot> {
     return this.#targetedSnapshot(
       await this.#request<JiraIssue>(
-        `/rest/api/3/issue/${encodeURIComponent(identifier)}?fields=summary,description,status,project,updated,labels`,
+        `/rest/api/3/issue/${encodeURIComponent(identifier)}?fields=${jiraIssueFields.join(",")}`,
       ),
     );
   }

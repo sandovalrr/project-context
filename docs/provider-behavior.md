@@ -10,6 +10,7 @@
   configured team/project target.
 - User discovery returns active members of the configured team and uses the
   Linear user ID as `assignee`.
+- Capabilities return team labels and Linear's canonical numeric priorities.
 - Canonical states require explicit project mappings.
 - Issue URLs are added through comments when a native relation is unavailable.
 
@@ -21,6 +22,8 @@
 - Pull requests returned through issue-shaped APIs are always excluded.
 - User discovery uses the repository's available issue assignees and returns
   the GitHub login as `assignee`.
+- Capabilities return repository labels and explicitly mark priority and generic
+  issue type as unsupported.
 - Native states are `open` and `closed`; `in_progress` requires configured
   labels.
 - No pull-request, release, or repository-administration operations are exposed.
@@ -34,6 +37,8 @@
   configured project target.
 - User discovery uses Jira's project-assignable user search and returns the
   account ID as `assignee`.
+- Capabilities return project issue types and project-available priorities;
+  labels accept custom values.
 - Canonical state mappings resolve to one uniquely named available transition.
 - Jira Server and Data Center are unsupported.
 
@@ -57,3 +62,16 @@ value that can be passed unchanged to issue creation or updates, plus the
 display name and any username or email the provider exposes. User search
 matches those available identity fields. Callers must present multiple matches
 for selection rather than guessing a user.
+
+Issue snapshots include normalized assignee and creator identities, priority,
+issue type, creation time, and due date. Unsupported or absent values are
+`null`. The assignee object includes the exact provider-native `assignee` value
+accepted by issue creation and updates.
+
+`get_issue_capabilities` returns supported fields and exact reusable options
+for the configured target. It also overlays host-configured canonical statuses,
+required creation fields, defaults, and named presets. Preset template names
+are returned, but template contents are not. Agents must not infer support from
+an empty option list: `operations`, `acceptsCustomValues`, `defaultValue`, and
+`discoveryTool` are authoritative. Inline option catalogs are bounded to 100;
+`optionsTruncated: true` means callers must not treat the catalog as complete.

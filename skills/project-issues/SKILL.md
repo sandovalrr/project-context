@@ -30,6 +30,10 @@ Never infer a provider from issue wording. Never retry a failed provider operati
 ## Read Issues
 
 - Use `list_issues` for canonical status filters, `search_issues` only for title/description text, and `get_issue` for a single issue.
+- Use `get_issue_capabilities` before creating an issue or whenever valid labels, priorities, issue types, canonical statuses, defaults, or presets are unknown. Pass returned option values unchanged.
+- Treat capability `operations` as authoritative. An empty option list does not mean arbitrary values are valid; check `acceptsCustomValues`, `defaultValue`, and `discoveryTool`.
+- Treat `optionsTruncated: true` as incomplete. Do not claim an unlisted value is invalid solely because it is absent from a truncated catalog.
+- Never select a creation preset silently. Present relevant named presets and let the user choose.
 - Never simulate status filtering by searching for text such as "in progress".
 - Treat `truncated: true` as incomplete. Surface missing or ambiguous mapping errors instead of weakening the requested filter.
 - For an unconfigured repository, explain that host-local context is missing. Conversational or explicitly supplied context may support a read, but do not treat it as write authorization.

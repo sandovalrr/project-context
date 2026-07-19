@@ -8,6 +8,8 @@ import {
 import type {
   AssignableUser,
   IssueCreateInput,
+  IssueFieldCapability,
+  IssueFieldName,
   IssueProviderAdapter,
   IssueSnapshot,
   IssueUpdateInput,
@@ -35,7 +37,8 @@ import {
 import { resolveRepository } from "./repository.ts";
 import { routeIssueProvider } from "./routing.ts";
 import { classifyCanonicalStatus, resolveStatusFilters } from "./status.ts";
-import type { CanonicalStatus, ProjectProvider, ProviderProfile } from "./types.ts";
+import type { CanonicalStatus, ProjectProvider, ProviderProfile, ProviderType } from "./types.ts";
+import { CANONICAL_STATUSES } from "./types.ts";
 
 interface OperationRuntime {
   repositoryId: string;
@@ -659,6 +662,105 @@ export function searchUsers(
   }
 
   return discoverUsers(normalizedQuery, options);
+}
+
+export interface IssueCreatePresetCapability {
+  name: string;
+  fields: Record<string, unknown>;
+  template: string | null;
+}
+
+export interface IssueCapabilitiesGroup {
+  providerAlias: string;
+  providerType: ProviderType;
+  fields: IssueFieldCapability[];
+  canonicalStatuses: CanonicalStatus[];
+  create: {
+    required: IssueFieldName[];
+    defaults: Record<string, unknown>;
+    presets: IssueCreatePresetCapability[];
+  };
+}
+
+interface IssueCapabilitiesOptions {
+  cwd?: string;
+  provider?: string;
+  all?: boolean;
+  fetcher?: typeof fetch;
+}
+
+function createPolicyCapabilities(provider: ProjectProvider): IssueCapabilitiesGroup["create"] {
+  const policy = provider.create;
+  const required: IssueFieldName[] = [
+    "title",
+    ...(policy?.required ?? []).filter((field) => field !== "title"),
+  ];
+  const presets = Object.entries(policy?.presets ?? {}).map(([name, preset]) => {
+    const { template, ...fields } = preset;
+
+    return { name, fields, template: template ?? null };
+  });
+
+  return {
+    required,
+    defaults: policy?.defaults ?? {},
+    presets,
+  };
+}
+
+async function capabilitiesFromRuntime(current: OperationRuntime): Promise<IssueCapabilitiesGroup> {
+  const providerCapabilities = await current.adapter.capabilities();
+  const create = createPolicyCapabilities(current.provider);
+  const required = new Set(create.required);
+  const fields = providerCapabilities.fields.map((field) => ({
+    ...field,
+    requiredOnCreate: field.requiredOnCreate || required.has(field.field),
+  }));
+  const canonicalStatuses = CANONICAL_STATUSES.filter(
+    (status) => current.provider.mappings?.status?.[status] !== undefined,
+  );
+
+  return {
+    providerAlias: current.providerAlias,
+    providerType: current.provider.type,
+    fields,
+    canonicalStatuses,
+    create,
+  };
+}
+
+export async function getIssueCapabilities(
+  options: IssueCapabilitiesOptions = {},
+): Promise<IssueCapabilitiesGroup[]> {
+  if (options.all && options.provider) {
+    throw new ProjectContextError("ROUTING_CONFLICT", "Use either --provider or --all, not both");
+  }
+
+  const cwd = options.cwd ?? process.cwd();
+  const runtimeOptions = {
+    ...(options.provider ? { explicitProvider: options.provider } : {}),
+    ...(options.fetcher ? { fetcher: options.fetcher } : {}),
+  };
+
+  if (!options.all) {
+    return [await capabilitiesFromRuntime(await runtime(cwd, runtimeOptions))];
+  }
+
+  const paths = getPaths();
+  const projects = await loadProjectsConfig(paths.projectsFile);
+  const repository = await resolveRepository(projects, cwd);
+  const aliases = Object.keys(repository.project.issues.providers);
+
+  return Promise.all(
+    aliases.map(async (alias) =>
+      capabilitiesFromRuntime(
+        await runtime(cwd, {
+          explicitProvider: alias,
+          ...(options.fetcher ? { fetcher: options.fetcher } : {}),
+        }),
+      ),
+    ),
+  );
 }
 
 export async function getIssue(

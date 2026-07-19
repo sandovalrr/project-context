@@ -1,5 +1,6 @@
 import { ProjectContextError } from "../core/errors.ts";
 import type { LinearProjectProvider, LinearProviderProfile } from "../core/types.ts";
+import { issueFieldCapability } from "./capabilities.ts";
 import { requestJson, versionOf } from "./http.ts";
 import type {
   AssignableUser,
@@ -9,7 +10,9 @@ import type {
   IssueProviderAdapter,
   IssueSnapshot,
   IssueUpdateInput,
+  IssueUser,
   ProviderIdentity,
+  ProviderIssueCapabilities,
   UserListResult,
 } from "./types.ts";
 
@@ -25,6 +28,14 @@ function linearStatusFilter(match: NonNullable<IssueListOptions["matches"]>[numb
   return conditions.length === 1 ? conditions[0] : { and: conditions };
 }
 
+const linearPriorities = [
+  { value: 0, label: "No priority" },
+  { value: 1, label: "Urgent" },
+  { value: 2, label: "High" },
+  { value: 3, label: "Medium" },
+  { value: 4, label: "Low" },
+];
+
 interface LinearIssue {
   id: string;
   identifier: string;
@@ -32,6 +43,12 @@ interface LinearIssue {
   description: string | null;
   url: string;
   updatedAt: string;
+  createdAt?: string;
+  dueDate?: string | null;
+  priority?: number;
+  priorityLabel?: string;
+  assignee?: LinearAssignableUser | null;
+  creator?: Omit<LinearAssignableUser, "active"> | null;
   state: { id: string; name: string };
   team?: { id: string };
   project?: { id: string } | null;
@@ -96,6 +113,15 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
       description: issue.description,
       status: issue.state.name,
       labels: issue.labels?.nodes.map((label) => label.name) ?? [],
+      assignee: issue.assignee ? this.#assignableUser(issue.assignee) : null,
+      creator: issue.creator ? this.#issueUser(issue.creator) : null,
+      priority:
+        issue.priority === undefined
+          ? null
+          : { value: issue.priority, label: issue.priorityLabel ?? String(issue.priority) },
+      issueType: null,
+      createdAt: issue.createdAt ?? null,
+      dueDate: issue.dueDate ?? null,
       url: issue.url,
       updatedAt: issue.updatedAt,
       version: versionOf(issue.updatedAt, issue.id),
@@ -110,6 +136,16 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
       username: null,
       email: user.email || null,
       active: user.active,
+    };
+  }
+
+  #issueUser(user: Omit<LinearAssignableUser, "active">): IssueUser {
+    return {
+      provider: this.type,
+      id: user.id,
+      displayName: user.name,
+      username: null,
+      email: user.email || null,
     };
   }
 
@@ -204,7 +240,7 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
     return priority;
   }
 
-  async #labelIds(names: string[]): Promise<string[]> {
+  async #labels(): Promise<Array<{ id: string; name: string }>> {
     const data = await this.#graphql<{
       issueLabels: { nodes: Array<{ id: string; name: string }> };
     }>(
@@ -213,8 +249,39 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
       }`,
       { teamId: this.target.team.id },
     );
+
+    return data.issueLabels.nodes;
+  }
+
+  async #capabilityLabels(): Promise<{
+    labels: Array<{ id: string; name: string }>;
+    truncated: boolean;
+  }> {
+    const data = await this.#graphql<{
+      issueLabels: {
+        nodes: Array<{ id: string; name: string }>;
+        pageInfo: { hasNextPage: boolean };
+      };
+    }>(
+      `query CapabilityLabels($teamId: ID!, $first: Int!) {
+        issueLabels(filter: { team: { id: { eq: $teamId } } }, first: $first) {
+          nodes { id name }
+          pageInfo { hasNextPage }
+        }
+      }`,
+      { teamId: this.target.team.id, first: 101 },
+    );
+
+    return {
+      labels: data.issueLabels.nodes.slice(0, 100),
+      truncated: data.issueLabels.pageInfo.hasNextPage || data.issueLabels.nodes.length > 100,
+    };
+  }
+
+  async #labelIds(names: string[]): Promise<string[]> {
+    const labels = await this.#labels();
     return names.map((name) => {
-      const matches = data.issueLabels.nodes.filter(
+      const matches = labels.filter(
         (label) => label.name.localeCompare(name, undefined, { sensitivity: "accent" }) === 0,
       );
       if (matches.length !== 1) {
@@ -273,7 +340,10 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
       `query List($filter: IssueFilter!, $first: Int!) {
         issues(filter: $filter, first: $first, orderBy: updatedAt) {
           nodes {
-            id identifier title description url updatedAt state { id name } labels { nodes { name } }
+            id identifier title description url updatedAt createdAt dueDate priority priorityLabel
+            state { id name } labels { nodes { name } }
+            assignee { id name email active }
+            creator { id name email }
             team { id }
             project { id }
           }
@@ -303,7 +373,10 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
       `query Search($filter: IssueFilter!, $first: Int!) {
         issues(filter: $filter, first: $first) {
           nodes {
-            id identifier title description url updatedAt state { id name } labels { nodes { name } }
+            id identifier title description url updatedAt createdAt dueDate priority priorityLabel
+            state { id name } labels { nodes { name } }
+            assignee { id name email active }
+            creator { id name email }
             team { id }
             project { id }
           }
@@ -322,11 +395,39 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
     return this.#users(query, limit);
   }
 
+  async capabilities(): Promise<ProviderIssueCapabilities> {
+    const labelResult = await this.#capabilityLabels();
+
+    return {
+      fields: [
+        issueFieldCapability("title", ["create", "update"]),
+        issueFieldCapability("description", ["create", "update"]),
+        issueFieldCapability("labels", ["create", "update"], {
+          options: labelResult.labels.map((label) => ({ value: label.name, label: label.name })),
+          optionsTruncated: labelResult.truncated,
+        }),
+        issueFieldCapability("assignee", ["create", "update"], {
+          clearable: true,
+          discoveryTool: "search_users",
+        }),
+        issueFieldCapability("priority", ["create", "update"], {
+          options: linearPriorities,
+          defaultValue: 0,
+          clearable: true,
+        }),
+        issueFieldCapability("issueType", []),
+      ],
+    };
+  }
+
   async get(identifier: string): Promise<IssueSnapshot> {
     const data = await this.#graphql<{ issue: LinearIssue }>(
       `query Issue($id: String!) {
         issue(id: $id) {
-          id identifier title description url updatedAt state { id name } labels { nodes { name } }
+          id identifier title description url updatedAt createdAt dueDate priority priorityLabel
+          state { id name } labels { nodes { name } }
+          assignee { id name email active }
+          creator { id name email }
           team { id }
           project { id }
         }
@@ -348,7 +449,12 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
       `mutation Create($input: IssueCreateInput!) {
         issueCreate(input: $input) {
           success
-          issue { id identifier title description url updatedAt state { id name } labels { nodes { name } } }
+          issue {
+            id identifier title description url updatedAt createdAt dueDate priority priorityLabel
+            state { id name } labels { nodes { name } }
+            assignee { id name email active }
+            creator { id name email }
+          }
         }
       }`,
       variables,
@@ -368,7 +474,12 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
       `mutation Update($id: String!, $input: IssueUpdateInput!) {
         issueUpdate(id: $id, input: $input) {
           success
-          issue { id identifier title description url updatedAt state { id name } labels { nodes { name } } }
+          issue {
+            id identifier title description url updatedAt createdAt dueDate priority priorityLabel
+            state { id name } labels { nodes { name } }
+            assignee { id name email active }
+            creator { id name email }
+          }
         }
       }`,
       { id: identifier, input },

@@ -7,6 +7,7 @@ import { resolveMcpWorkingDirectory } from "./core/mcp-working-directory.ts";
 import {
   applyIssueOperation,
   getIssue,
+  getIssueCapabilities,
   listIssues,
   listUsers,
   prepareIssueOperation,
@@ -18,6 +19,25 @@ import { CANONICAL_STATUSES } from "./core/types.ts";
 import { PACKAGE_VERSION, SERVER_NAME, setupCommand } from "./metadata.ts";
 
 const providerTypeSchema = z.enum(["linear", "github", "jira-cloud"]);
+const issueUserSchema = z.object({
+  provider: providerTypeSchema,
+  id: z.string(),
+  displayName: z.string(),
+  username: z.string().nullable(),
+  email: z.string().nullable(),
+});
+const userSchema = z.object({
+  provider: providerTypeSchema,
+  assignee: z.string(),
+  displayName: z.string(),
+  username: z.string().nullable(),
+  email: z.string().nullable(),
+  active: z.boolean(),
+});
+const issueOptionSchema = z.object({
+  value: z.union([z.string(), z.number()]),
+  label: z.string(),
+});
 const issueSchema = z.object({
   provider: providerTypeSchema,
   id: z.string(),
@@ -26,6 +46,12 @@ const issueSchema = z.object({
   description: z.string().nullable(),
   status: z.string(),
   labels: z.array(z.string()),
+  assignee: userSchema.nullable(),
+  creator: issueUserSchema.nullable(),
+  priority: issueOptionSchema.nullable(),
+  issueType: issueOptionSchema.nullable(),
+  createdAt: z.string().nullable(),
+  dueDate: z.string().nullable(),
   url: z.string().url(),
   updatedAt: z.string(),
   version: z.string(),
@@ -61,14 +87,6 @@ const listResultSchema = z.array(
     truncated: z.boolean(),
   }),
 );
-const userSchema = z.object({
-  provider: providerTypeSchema,
-  assignee: z.string(),
-  displayName: z.string(),
-  username: z.string().nullable(),
-  email: z.string().nullable(),
-  active: z.boolean(),
-});
 const userListResultSchema = z.array(
   z.object({
     providerAlias: z.string(),
@@ -77,6 +95,45 @@ const userListResultSchema = z.array(
   }),
 );
 const getResultSchema = z.object({ providerAlias: z.string(), issue: issueSchema });
+const issueFieldNameSchema = z.enum([
+  "title",
+  "description",
+  "labels",
+  "assignee",
+  "priority",
+  "issueType",
+]);
+const capabilitiesResultSchema = z.array(
+  z.object({
+    providerAlias: z.string(),
+    providerType: providerTypeSchema,
+    fields: z.array(
+      z.object({
+        field: issueFieldNameSchema,
+        operations: z.array(z.enum(["create", "update"])),
+        requiredOnCreate: z.boolean(),
+        clearable: z.boolean(),
+        acceptsCustomValues: z.boolean(),
+        options: z.array(issueOptionSchema),
+        optionsTruncated: z.boolean(),
+        defaultValue: z.union([z.string(), z.number()]).nullable(),
+        discoveryTool: z.literal("search_users").nullable(),
+      }),
+    ),
+    canonicalStatuses: z.array(canonicalStatusSchema),
+    create: z.object({
+      required: z.array(z.string()),
+      defaults: z.record(z.string(), z.unknown()),
+      presets: z.array(
+        z.object({
+          name: z.string(),
+          fields: z.record(z.string(), z.unknown()),
+          template: z.string().nullable(),
+        }),
+      ),
+    }),
+  }),
+);
 const prepareResultSchema = z.object({
   token: z.string().uuid(),
   expiresAt: z.string(),
@@ -185,7 +242,7 @@ export function createProjectIssuesServer(): McpServer {
     { name: SERVER_NAME, version: PACKAGE_VERSION },
     {
       instructions:
-        "Resolve repository context before issue work. Use list_issues for canonical status filters and search_issues only for title or description text. Use list_users or search_users to obtain an exact assignee value before assigning; ask the user to choose when matches are ambiguous. Reads are provider-routed. External writes require prepare_issue_change followed by apply_issue_change using the returned short-lived token.",
+        "Resolve repository context before issue work. Use list_issues for canonical status filters and search_issues only for title or description text. Use get_issue_capabilities before creating or when exact field options are unknown. Use list_users or search_users to obtain an exact assignee value before assigning; ask the user to choose when matches are ambiguous. Reads are provider-routed. External writes require prepare_issue_change followed by apply_issue_change using the returned short-lived token.",
     },
   );
 
@@ -326,6 +383,33 @@ export function createProjectIssuesServer(): McpServer {
           ...(provider ? { provider } : {}),
           ...(all === undefined ? {} : { all }),
           ...(limit === undefined ? {} : { limit }),
+        }),
+      ),
+  );
+
+  server.registerTool(
+    "get_issue_capabilities",
+    {
+      title: "Get issue capabilities",
+      description:
+        "Get supported issue fields, exact reusable options, configured canonical statuses, defaults, and named creation presets for the configured target.",
+      inputSchema: {
+        cwd: cwdSchema,
+        provider: providerSchema,
+        all: z
+          .boolean()
+          .optional()
+          .describe("Get capabilities from all configured providers only when explicitly true"),
+      },
+      outputSchema: resultSchema(capabilitiesResultSchema),
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    },
+    ({ cwd, provider, all }) =>
+      safely(async () =>
+        getIssueCapabilities({
+          cwd: await resolveMcpWorkingDirectory(server, cwd),
+          ...(provider ? { provider } : {}),
+          ...(all === undefined ? {} : { all }),
         }),
       ),
   );

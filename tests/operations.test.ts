@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   applyIssueOperation,
+  getIssueCapabilities,
   listIssues,
   listUsers,
   prepareIssueOperation,
@@ -142,6 +143,14 @@ projects:
                   state: open
                   labels_all: [in-progress]
               done: closed
+          create:
+            required: [title, description]
+            defaults:
+              labels: [triage]
+            presets:
+              bug:
+                labels: [bug]
+                template: bug-report
 `,
     );
     await writeFile(
@@ -267,6 +276,47 @@ describe("assignable user discovery", () => {
   });
 });
 
+describe("issue capabilities", () => {
+  test("combines provider options with configured statuses and create policy", async () => {
+    await withFixture(async (repository) => {
+      const fetcher = mockFetch([
+        { id: 1, login: "example-user" },
+        [
+          { id: 1, name: "bug" },
+          { id: 2, name: "triage" },
+        ],
+      ]);
+
+      const result = await getIssueCapabilities({ cwd: repository, fetcher });
+
+      expect(result).toMatchObject([
+        {
+          providerAlias: "github",
+          providerType: "github",
+          canonicalStatuses: ["open", "in_progress", "done"],
+          create: {
+            required: ["title", "description"],
+            defaults: { labels: ["triage"] },
+            presets: [{ name: "bug", fields: { labels: ["bug"] }, template: "bug-report" }],
+          },
+        },
+      ]);
+      const fields = result[0]?.fields ?? [];
+      expect(fields.find(({ field }) => field === "description")?.requiredOnCreate).toBe(true);
+      expect(fields.find(({ field }) => field === "labels")?.options).toEqual([
+        { value: "bug", label: "bug" },
+        { value: "triage", label: "triage" },
+      ]);
+    });
+  });
+
+  test("rejects conflicting provider routing", async () => {
+    await expect(getIssueCapabilities({ all: true, provider: "github" })).rejects.toMatchObject({
+      code: "ROUTING_CONFLICT",
+    });
+  });
+});
+
 const linearIdentity = {
   data: {
     viewer: { id: "user-1", name: "R", email: "r@example.com" },
@@ -364,7 +414,10 @@ describe("issue write workflow", () => {
 
       await expect(
         prepareIssueOperation(
-          { operation: "create", input: { title: "Example", priority: "high" } },
+          {
+            operation: "create",
+            input: { title: "Example", description: "Details", priority: "high" },
+          },
           { cwd: repository, fetcher },
         ),
       ).rejects.toThrow("not supported for github");

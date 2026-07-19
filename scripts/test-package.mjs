@@ -52,6 +52,7 @@ try {
   const expected = [
     "apply_issue_change",
     "get_issue",
+    "get_issue_capabilities",
     "list_issues",
     "list_users",
     "prepare_issue_change",
