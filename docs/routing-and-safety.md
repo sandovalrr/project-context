@@ -17,6 +17,11 @@ is configured for the repository.
 Normal searches use the default provider. Searching all configured providers
 must be explicit and results retain provider-qualified identifiers.
 
+Provider routing is not sufficient by itself: Linear direct lookups must match
+the configured team and explicit/no-project target, and Jira direct lookups
+must match the configured project. Prepare and apply re-run those checks before
+an external mutation can proceed.
+
 ## Missing repository configuration
 
 Normal coding work may continue with issue integration marked unresolved.

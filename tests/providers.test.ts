@@ -43,6 +43,21 @@ const linearTarget: LinearProjectProvider["target"] = {
   project: "none",
 };
 
+function linearIssue(teamId: string, projectId?: string) {
+  return {
+    id: "issue-1",
+    identifier: "ENG-1",
+    title: "Targeted issue",
+    description: "Details",
+    url: "https://linear.app/workspace/issue/ENG-1",
+    updatedAt: "2026-07-18T10:00:00Z",
+    state: { id: "state-1", name: "Backlog" },
+    labels: { nodes: [] },
+    team: { id: teamId },
+    project: projectId ? { id: projectId } : null,
+  };
+}
+
 const jiraProfile: JiraProviderProfile = {
   type: "jira-cloud",
   credential: "jira-work",
@@ -92,6 +107,68 @@ describe("GitHub Issues adapter", () => {
 });
 
 describe("Linear adapter", () => {
+  test("accepts an issue in the configured explicit project", async () => {
+    const target: LinearProjectProvider["target"] = {
+      team: { id: "team-1", name: "Engineering" },
+      project: { id: "project-1", name: "Payments" },
+    };
+    const { fetcher, requests } = mockFetch([
+      { data: { issue: linearIssue("team-1", "project-1") } },
+    ]);
+    const adapter = new LinearIssuesAdapter(linearProfile, target, { token: "secret" }, fetcher);
+
+    expect((await adapter.get("ENG-1")).identifier).toBe("ENG-1");
+    expect(JSON.parse(String(requests[0]?.init?.body)).query).toContain("team { id }");
+    expect(JSON.parse(String(requests[0]?.init?.body)).query).toContain("project { id }");
+  });
+
+  test("rejects an issue in a different explicit project", async () => {
+    const target: LinearProjectProvider["target"] = {
+      team: { id: "team-1", name: "Engineering" },
+      project: { id: "project-1", name: "Payments" },
+    };
+    const { fetcher } = mockFetch([{ data: { issue: linearIssue("team-1", "project-2") } }]);
+    const adapter = new LinearIssuesAdapter(linearProfile, target, { token: "secret" }, fetcher);
+
+    await expect(adapter.get("ENG-1")).rejects.toMatchObject({ code: "ISSUE_OUTSIDE_TARGET" });
+  });
+
+  test("accepts an unprojected issue for a no-project target", async () => {
+    const { fetcher } = mockFetch([{ data: { issue: linearIssue("team-1") } }]);
+    const adapter = new LinearIssuesAdapter(
+      linearProfile,
+      linearTarget,
+      { token: "secret" },
+      fetcher,
+    );
+
+    expect((await adapter.get("ENG-1")).identifier).toBe("ENG-1");
+  });
+
+  test("rejects a projected issue for a no-project target", async () => {
+    const { fetcher } = mockFetch([{ data: { issue: linearIssue("team-1", "project-1") } }]);
+    const adapter = new LinearIssuesAdapter(
+      linearProfile,
+      linearTarget,
+      { token: "secret" },
+      fetcher,
+    );
+
+    await expect(adapter.get("ENG-1")).rejects.toMatchObject({ code: "ISSUE_OUTSIDE_TARGET" });
+  });
+
+  test("rejects an issue in a different team", async () => {
+    const { fetcher } = mockFetch([{ data: { issue: linearIssue("team-2") } }]);
+    const adapter = new LinearIssuesAdapter(
+      linearProfile,
+      linearTarget,
+      { token: "secret" },
+      fetcher,
+    );
+
+    await expect(adapter.get("ENG-1")).rejects.toMatchObject({ code: "ISSUE_OUTSIDE_TARGET" });
+  });
+
   test("searches through the supported issues filter within the configured target", async () => {
     const issue = {
       id: "issue-1",
@@ -205,6 +282,7 @@ describe("Jira Cloud adapter", () => {
           content: [{ type: "paragraph", content: [{ type: "text", text: "Details" }] }],
         },
         status: { name: "To Do" },
+        project: { id: "10000" },
         labels: [],
         updated: "2026-07-18T10:00:00.000+0000",
       },
@@ -224,6 +302,60 @@ describe("Jira Cloud adapter", () => {
     expect(body.fields.project).toEqual({ id: "10000" });
     expect(body.fields.description).toMatchObject({ type: "doc", version: 1 });
     expect(requests[1]?.url).toContain("/rest/api/3/issue/OPS-4");
+    expect(requests[1]?.url).toContain("project");
+  });
+
+  test("keeps searches scoped and requests project data for target validation", async () => {
+    const issue = {
+      id: "10001",
+      key: "OPS-4",
+      self: "https://example.atlassian.net/rest/api/3/issue/10001",
+      fields: {
+        summary: "Targeted issue",
+        status: { name: "To Do" },
+        project: { id: "10000" },
+        labels: [],
+        updated: "2026-07-18T10:00:00.000+0000",
+      },
+    };
+    const { fetcher, requests } = mockFetch([{ issues: [issue] }]);
+    const adapter = new JiraCloudIssuesAdapter(
+      jiraProfile,
+      jiraTarget,
+      { email: "r@example.com", token: "secret" },
+      fetcher,
+    );
+
+    expect((await adapter.search("targeted", 1))[0]?.identifier).toBe("OPS-4");
+    const body = JSON.parse(String(requests[0]?.init?.body));
+    expect(body.jql).toContain('project = "10000"');
+    expect(body.fields).toContain("project");
+  });
+
+  test("rejects an issue outside the configured project", async () => {
+    const issue = {
+      id: "10001",
+      key: "OTHER-4",
+      self: "https://example.atlassian.net/rest/api/3/issue/10001",
+      fields: {
+        summary: "Wrong project",
+        status: { name: "To Do" },
+        project: { id: "20000" },
+        labels: [],
+        updated: "2026-07-18T10:00:00.000+0000",
+      },
+    };
+    const { fetcher } = mockFetch([issue]);
+    const adapter = new JiraCloudIssuesAdapter(
+      jiraProfile,
+      jiraTarget,
+      { email: "r@example.com", token: "secret" },
+      fetcher,
+    );
+
+    await expect(adapter.get("OTHER-4")).rejects.toMatchObject({
+      code: "ISSUE_OUTSIDE_TARGET",
+    });
   });
 });
 

@@ -51,6 +51,9 @@ describe("provider-neutral MCP server", () => {
     expect(tools.tools.find((tool) => tool.name === "get_issue")?.annotations?.readOnlyHint).toBe(
       true,
     );
+    const searchTool = tools.tools.find((tool) => tool.name === "search_issues");
+    expect(searchTool?.description).toContain("titles and descriptions");
+    expect(JSON.stringify(searchTool?.inputSchema)).toContain("not a status or structured filter");
     expect(
       tools.tools.find((tool) => tool.name === "apply_issue_change")?.annotations?.destructiveHint,
     ).toBe(true);

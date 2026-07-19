@@ -10,6 +10,7 @@ afterEach(async () => {
   delete process.env.PROJECT_CONTEXT_CONFIG_DIR;
   delete process.env.PROJECT_CONTEXT_STATE_DIR;
   delete process.env.TEST_GITHUB_TOKEN;
+  delete process.env.TEST_LINEAR_TOKEN;
 });
 
 function mockFetch(responses: unknown[]) {
@@ -23,6 +24,65 @@ function mockFetch(responses: unknown[]) {
     });
   });
   return fetcher as unknown as typeof fetch;
+}
+
+async function withLinearFixture<T>(work: (repository: string) => Promise<T>): Promise<T> {
+  return withTemporaryDirectory("project-context-linear-operations-", async (directory) => {
+    process.env.PROJECT_CONTEXT_CONFIG_DIR = join(directory, "config");
+    process.env.PROJECT_CONTEXT_STATE_DIR = join(directory, "state");
+    process.env.TEST_LINEAR_TOKEN = "token";
+    await setupHostConfiguration();
+    const repository = join(directory, "repository");
+    Bun.spawnSync(["git", "init", "-q", repository]);
+    Bun.spawnSync([
+      "git",
+      "-C",
+      repository,
+      "remote",
+      "add",
+      "origin",
+      "git@github.com:example/example-repository.git",
+    ]);
+    await writeFile(
+      getPaths().projectsFile,
+      `version: 1
+providers:
+  linear-example:
+    type: linear
+    credential: linear-example
+    expected_identity:
+      workspace:
+        id: workspace-1
+        name: Workspace
+projects:
+  github.com/example/example-repository:
+    issues:
+      default: linear
+      providers:
+        linear:
+          type: linear
+          profile: linear-example
+          identifiers: ['^ENG-[0-9]+$']
+          target:
+            team:
+              id: team-1
+              name: Engineering
+            project: none
+`,
+    );
+    await writeFile(
+      getPaths().credentialsFile,
+      `version: 1
+credentials:
+  linear-example:
+    fields:
+      token:
+        source: environment
+        variable: TEST_LINEAR_TOKEN
+`,
+    );
+    return work(repository);
+  });
 }
 
 async function withFixture<T>(work: (repository: string) => Promise<T>): Promise<T> {
@@ -94,7 +154,66 @@ const issue = {
   updated_at: "2026-07-18T10:00:00Z",
 };
 
+const linearIdentity = {
+  data: {
+    viewer: { id: "user-1", name: "R", email: "r@example.com" },
+    organization: { id: "workspace-1", name: "Workspace" },
+  },
+};
+
+function linearIssue(projectId?: string) {
+  return {
+    data: {
+      issue: {
+        id: "issue-1",
+        identifier: "ENG-1",
+        title: "Example issue",
+        description: "Description",
+        url: "https://linear.app/workspace/issue/ENG-1",
+        updatedAt: "2026-07-18T10:00:00Z",
+        state: { id: "state-1", name: "Backlog" },
+        labels: { nodes: [] },
+        team: { id: "team-1" },
+        project: projectId ? { id: projectId } : null,
+      },
+    },
+  };
+}
+
 describe("issue write workflow", () => {
+  test("refuses to prepare a Linear mutation outside the configured target", async () => {
+    await withLinearFixture(async (repository) => {
+      const fetcher = mockFetch([linearIdentity, linearIssue("project-1")]);
+
+      await expect(
+        prepareIssueOperation(
+          { operation: "comment", identifier: "linear:ENG-1", body: "comment" },
+          { cwd: repository, fetcher },
+        ),
+      ).rejects.toMatchObject({ code: "ISSUE_OUTSIDE_TARGET" });
+    });
+  });
+
+  test("refuses to apply a Linear mutation after the issue leaves the target", async () => {
+    await withLinearFixture(async (repository) => {
+      const fetcher = mockFetch([
+        linearIdentity,
+        linearIssue(),
+        linearIdentity,
+        linearIssue("project-1"),
+      ]);
+      const preview = await prepareIssueOperation(
+        { operation: "comment", identifier: "linear:ENG-1", body: "comment" },
+        { cwd: repository, fetcher },
+      );
+
+      await expect(
+        applyIssueOperation(preview.token, { cwd: repository, fetcher }),
+      ).rejects.toMatchObject({ code: "ISSUE_OUTSIDE_TARGET" });
+      expect((fetcher as unknown as ReturnType<typeof mock>).mock.calls).toHaveLength(4);
+    });
+  });
+
   test("previews, revalidates, applies, consumes, and audits without issue content", async () => {
     await withFixture(async (repository) => {
       const fetcher = mockFetch([
