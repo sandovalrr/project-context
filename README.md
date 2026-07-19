@@ -66,13 +66,14 @@ project-context issue list --status open --status in_progress
 project-context issue user search "Dioni"
 project-context issue capabilities
 project-context issue option search labels security
+project-context issue comment list github:#42 --limit 20
 project-context doctor
 project-context audit list
 project-context skill status
 project-context integration manifest --client codex
 ```
 
-The stdio server exposes ten tools:
+The stdio server exposes eleven tools:
 
 - `resolve_project_context`
 - `list_issues`
@@ -82,6 +83,7 @@ The stdio server exposes ten tools:
 - `search_issue_options`
 - `get_issue_capabilities`
 - `get_issue`
+- `list_issue_comments`
 - `prepare_issue_change`
 - `apply_issue_change`
 

@@ -4,6 +4,8 @@ import { issueFieldCapability } from "./capabilities.ts";
 import { requestJson, versionOf } from "./http.ts";
 import type {
   AssignableUser,
+  IssueComment,
+  IssueCommentListResult,
   IssueCreateInput,
   IssueListOptions,
   IssueListResult,
@@ -53,6 +55,7 @@ interface GitHubIssue {
   user?: GitHubUser | null;
   labels?: Array<string | { name?: string }>;
   pull_request?: unknown;
+  comments?: number;
 }
 
 interface GitHubUser {
@@ -63,6 +66,15 @@ interface GitHubUser {
 interface GitHubLabel {
   id: number;
   name: string;
+}
+
+interface GitHubComment {
+  id: number;
+  body: string;
+  user: GitHubUser | null;
+  created_at: string;
+  updated_at: string;
+  html_url: string;
 }
 
 type GitHubAssignableUser = GitHubUser;
@@ -234,6 +246,27 @@ export class GitHubIssuesAdapter implements IssueProviderAdapter {
     };
   }
 
+  #assertIssue(issue: GitHubIssue): void {
+    if (!issue.pull_request) return;
+
+    throw new ProjectContextError(
+      "ISSUE_PULL_REQUEST_UNSUPPORTED",
+      "GitHub pull requests are outside the configured issue target",
+    );
+  }
+
+  #comment(comment: GitHubComment): IssueComment {
+    return {
+      provider: this.type,
+      id: String(comment.id),
+      body: comment.body,
+      author: comment.user ? this.#issueUser(comment.user) : null,
+      createdAt: comment.created_at,
+      updatedAt: comment.updated_at,
+      url: comment.html_url,
+    };
+  }
+
   async identity(): Promise<ProviderIdentity> {
     const user = await this.#request<{ id: number; login: string }>("/user");
     return {
@@ -335,7 +368,49 @@ export class GitHubIssuesAdapter implements IssueProviderAdapter {
 
   async get(identifier: string): Promise<IssueSnapshot> {
     const number = identifier.replace(/^#/, "");
-    return this.#snapshot(await this.#request<GitHubIssue>(this.#issuePath(`/${number}`)));
+    const issue = await this.#request<GitHubIssue>(this.#issuePath(`/${number}`));
+    this.#assertIssue(issue);
+
+    return this.#snapshot(issue);
+  }
+
+  async listComments(identifier: string, limit = 30): Promise<IssueCommentListResult> {
+    const number = identifier.replace(/^#/, "");
+    const issue = await this.#request<GitHubIssue>(this.#issuePath(`/${number}`));
+    this.#assertIssue(issue);
+
+    const total = issue.comments ?? 0;
+    if (total === 0) return { comments: [], truncated: false };
+
+    const pageSize = 100;
+    const lastPage = Math.max(1, Math.ceil(total / pageSize));
+    const lastParameters = new URLSearchParams({
+      per_page: String(pageSize),
+      page: String(lastPage),
+    });
+    const lastComments = await this.#request<GitHubComment[]>(
+      this.#issuePath(`/${number}/comments?${lastParameters}`),
+    );
+    const needsPreviousPage = lastPage > 1 && lastComments.length < limit;
+    const previousComments = needsPreviousPage
+      ? await this.#request<GitHubComment[]>(
+          this.#issuePath(
+            `/${number}/comments?${new URLSearchParams({
+              per_page: String(pageSize),
+              page: String(lastPage - 1),
+            })}`,
+          ),
+        )
+      : [];
+    const verifiedIssue = await this.#request<GitHubIssue>(this.#issuePath(`/${number}`));
+    this.#assertIssue(verifiedIssue);
+
+    const comments = [...previousComments, ...lastComments]
+      .slice(-limit)
+      .toSorted((left, right) => right.created_at.localeCompare(left.created_at))
+      .map((comment) => this.#comment(comment));
+
+    return { comments, truncated: total > comments.length };
   }
 
   async create(input: IssueCreateInput): Promise<IssueSnapshot> {

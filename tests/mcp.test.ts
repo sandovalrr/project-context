@@ -28,6 +28,7 @@ describe("provider-neutral MCP server", () => {
       "apply_issue_change",
       "get_issue",
       "get_issue_capabilities",
+      "list_issue_comments",
       "list_issues",
       "list_users",
       "prepare_issue_change",
@@ -131,6 +132,34 @@ describe("provider-neutral MCP server", () => {
       },
     });
     expect(searchOptionsTool?.annotations?.readOnlyHint).toBe(true);
+    const commentsTool = tools.tools.find((tool) => tool.name === "list_issue_comments");
+    expect(commentsTool?.description).toContain("newest first");
+    expect(commentsTool?.description).toContain("not field history");
+    expect(commentsTool?.inputSchema).toMatchObject({
+      properties: {
+        reference: { type: "string", minLength: 1 },
+        provider: { type: "string" },
+        limit: { type: "integer", minimum: 1, maximum: 100 },
+      },
+    });
+    expect(commentsTool?.outputSchema).toMatchObject({
+      properties: {
+        result: {
+          properties: {
+            comments: {
+              items: {
+                properties: {
+                  body: { type: "string" },
+                  author: { anyOf: expect.any(Array) },
+                },
+              },
+            },
+            truncated: { type: "boolean" },
+          },
+        },
+      },
+    });
+    expect(commentsTool?.annotations?.readOnlyHint).toBe(true);
     expect(
       tools.tools.find((tool) => tool.name === "apply_issue_change")?.annotations?.destructiveHint,
     ).toBe(true);

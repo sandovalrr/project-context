@@ -308,6 +308,289 @@ describe("GitHub Issues adapter", () => {
   });
 });
 
+describe("target-scoped issue comment reads", () => {
+  test("lists the newest GitHub issue comments with bounded tail pagination", async () => {
+    const issue = {
+      id: 20,
+      number: 12,
+      title: "Commented issue",
+      body: null,
+      state: "open",
+      html_url: "https://github.com/acme/payments/issues/12",
+      updated_at: "2026-07-18T10:00:00Z",
+      comments: 102,
+    };
+    const githubComment = (id: number, createdAt: string) => ({
+      id,
+      body: `comment-${id}`,
+      user: id === 100 ? null : { id, login: `user-${id}` },
+      created_at: createdAt,
+      updated_at: createdAt,
+      html_url: `https://github.com/acme/payments/issues/12#issuecomment-${id}`,
+    });
+    const { fetcher, requests } = mockFetch([
+      issue,
+      [githubComment(101, "2026-07-18T11:00:00Z"), githubComment(102, "2026-07-18T12:00:00Z")],
+      [githubComment(100, "2026-07-18T10:00:00Z")],
+      issue,
+    ]);
+    const adapter = new GitHubIssuesAdapter(
+      githubProfile,
+      githubTarget,
+      { token: "secret" },
+      fetcher,
+      { owner: "acme", name: "payments" },
+    );
+
+    const result = await adapter.listComments("#12", 3);
+
+    expect(result.truncated).toBe(true);
+    expect(result.comments.map(({ id }) => id)).toEqual(["102", "101", "100"]);
+    expect(result.comments[0]).toMatchObject({ id: "102", body: "comment-102" });
+    expect(result.comments[1]?.author).toMatchObject({ username: "user-101" });
+    expect(result.comments[2]?.author).toBeNull();
+    expect(requests.map(({ url }) => decodeURIComponent(url))).toEqual([
+      "https://api.github.com/repos/acme/payments/issues/12",
+      "https://api.github.com/repos/acme/payments/issues/12/comments?per_page=100&page=2",
+      "https://api.github.com/repos/acme/payments/issues/12/comments?per_page=100&page=1",
+      "https://api.github.com/repos/acme/payments/issues/12",
+    ]);
+  });
+
+  test("rejects GitHub pull requests before reading their issue-shaped comments", async () => {
+    const { fetcher, requests } = mockFetch([
+      {
+        id: 20,
+        number: 12,
+        title: "Pull request",
+        body: null,
+        state: "open",
+        html_url: "https://github.com/acme/payments/pull/12",
+        updated_at: "2026-07-18T10:00:00Z",
+        comments: 1,
+        pull_request: {},
+      },
+    ]);
+    const adapter = new GitHubIssuesAdapter(
+      githubProfile,
+      githubTarget,
+      { token: "secret" },
+      fetcher,
+      { owner: "acme", name: "payments" },
+    );
+
+    await expect(adapter.listComments("#12")).rejects.toMatchObject({
+      code: "ISSUE_PULL_REQUEST_UNSUPPORTED",
+    });
+    expect(requests).toHaveLength(1);
+  });
+
+  test("atomically validates the Linear target before returning newest-first comments", async () => {
+    const { fetcher } = mockFetch([
+      {
+        data: {
+          issue: {
+            id: "issue-1",
+            identifier: "ENG-1",
+            team: { id: "team-1" },
+            project: null,
+            comments: {
+              nodes: [
+                {
+                  id: "comment-1",
+                  body: "Earlier",
+                  createdAt: "2026-07-18T10:00:00Z",
+                  updatedAt: "2026-07-18T10:00:00Z",
+                  url: "https://linear.app/comment/comment-1",
+                  user: { id: "user-1", name: "Dioni", email: "dioni@example.com" },
+                },
+                {
+                  id: "comment-2",
+                  body: "Later",
+                  createdAt: "2026-07-18T11:00:00Z",
+                  updatedAt: "2026-07-18T11:00:00Z",
+                  url: "https://linear.app/comment/comment-2",
+                  user: null,
+                },
+              ],
+              pageInfo: { hasPreviousPage: true },
+            },
+          },
+        },
+      },
+    ]);
+    const adapter = new LinearIssuesAdapter(
+      linearProfile,
+      linearTarget,
+      { token: "secret" },
+      fetcher,
+    );
+
+    const result = await adapter.listComments("ENG-1", 2);
+
+    expect(result.truncated).toBe(true);
+    expect(result.comments.map(({ id }) => id)).toEqual(["comment-2", "comment-1"]);
+    expect(result.comments[0]).toMatchObject({ body: "Later", author: null });
+    expect(result.comments[1]?.author).toMatchObject({ displayName: "Dioni" });
+  });
+
+  test("does not expose Linear comment bodies when target validation fails", async () => {
+    const sensitiveBody = "never-return-this-comment";
+    const { fetcher } = mockFetch([
+      {
+        data: {
+          issue: {
+            id: "issue-2",
+            identifier: "OTHER-2",
+            team: { id: "other-team" },
+            project: null,
+            comments: {
+              nodes: [
+                {
+                  id: "comment-sensitive",
+                  body: sensitiveBody,
+                  createdAt: "2026-07-18T11:00:00Z",
+                  updatedAt: "2026-07-18T11:00:00Z",
+                },
+              ],
+              pageInfo: { hasPreviousPage: false },
+            },
+          },
+        },
+      },
+    ]);
+    const adapter = new LinearIssuesAdapter(
+      linearProfile,
+      linearTarget,
+      { token: "secret" },
+      fetcher,
+    );
+
+    try {
+      await adapter.listComments("OTHER-2");
+      throw new Error("expected target validation failure");
+    } catch (error) {
+      expect(error).toMatchObject({ code: "ISSUE_OUTSIDE_TARGET" });
+      expect(String(error)).not.toContain(sensitiveBody);
+    }
+  });
+
+  test("revalidates Jira project scope after fetching the newest comment page", async () => {
+    const issue = {
+      id: "10001",
+      key: "OPS-4",
+      self: "https://example.atlassian.net/rest/api/3/issue/10001",
+      fields: {
+        summary: "Commented issue",
+        status: { name: "To Do" },
+        project: { id: "10000" },
+        updated: "2026-07-18T10:00:00.000+0000",
+      },
+    };
+    const jiraComment = (id: string, body: string, created: string) => ({
+      id,
+      body: {
+        type: "doc",
+        version: 1,
+        content: [{ type: "paragraph", content: [{ type: "text", text: body }] }],
+      },
+      author: { accountId: `account-${id}`, displayName: `User ${id}` },
+      created,
+      updated: created,
+    });
+    const { fetcher, requests } = mockFetch([
+      issue,
+      {
+        comments: [
+          jiraComment("1", "Oldest", "2026-07-18T10:00:00.000+0000"),
+          jiraComment("2", "Middle", "2026-07-18T11:00:00.000+0000"),
+        ],
+        total: 3,
+      },
+      {
+        comments: [
+          jiraComment("2", "Middle", "2026-07-18T11:00:00.000+0000"),
+          jiraComment("3", "Newest", "2026-07-18T12:00:00.000+0000"),
+        ],
+        total: 3,
+      },
+      issue,
+    ]);
+    const adapter = new JiraCloudIssuesAdapter(
+      jiraProfile,
+      jiraTarget,
+      { email: "r@example.com", token: "secret" },
+      fetcher,
+    );
+
+    expect(await adapter.listComments("OPS-4", 2)).toEqual({
+      comments: [
+        expect.objectContaining({ id: "3", body: "Newest" }),
+        expect.objectContaining({ id: "2", body: "Middle" }),
+      ],
+      truncated: true,
+    });
+    expect(requests.map(({ url }) => decodeURIComponent(url))).toEqual([
+      expect.stringContaining("/rest/api/3/issue/OPS-4?fields="),
+      "https://example.atlassian.net/rest/api/3/issue/OPS-4/comment?startAt=0&maxResults=2",
+      "https://example.atlassian.net/rest/api/3/issue/OPS-4/comment?startAt=1&maxResults=2",
+      expect.stringContaining("/rest/api/3/issue/OPS-4?fields="),
+    ]);
+  });
+
+  test("withholds Jira comment bodies when post-fetch target revalidation fails", async () => {
+    const targetedIssue = {
+      id: "10001",
+      key: "OPS-4",
+      self: "https://example.atlassian.net/rest/api/3/issue/10001",
+      fields: {
+        summary: "Moved issue",
+        status: { name: "To Do" },
+        project: { id: "10000" },
+        updated: "2026-07-18T10:00:00.000+0000",
+      },
+    };
+    const outsideIssue = {
+      ...targetedIssue,
+      fields: { ...targetedIssue.fields, project: { id: "20000" } },
+    };
+    const sensitiveBody = "jira-comment-must-not-escape";
+    const { fetcher } = mockFetch([
+      targetedIssue,
+      {
+        comments: [
+          {
+            id: "1",
+            body: {
+              type: "doc",
+              version: 1,
+              content: [{ type: "paragraph", content: [{ type: "text", text: sensitiveBody }] }],
+            },
+            created: "2026-07-18T10:00:00.000+0000",
+            updated: "2026-07-18T10:00:00.000+0000",
+          },
+        ],
+        total: 1,
+      },
+      outsideIssue,
+    ]);
+    const adapter = new JiraCloudIssuesAdapter(
+      jiraProfile,
+      jiraTarget,
+      { email: "r@example.com", token: "secret" },
+      fetcher,
+    );
+
+    try {
+      await adapter.listComments("OPS-4");
+      throw new Error("expected target validation failure");
+    } catch (error) {
+      expect(error).toMatchObject({ code: "ISSUE_OUTSIDE_TARGET" });
+      expect(String(error)).not.toContain(sensitiveBody);
+    }
+  });
+});
+
 describe("Linear adapter", () => {
   test("accepts an issue in the configured explicit project", async () => {
     const target: LinearProjectProvider["target"] = {

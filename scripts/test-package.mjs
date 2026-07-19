@@ -53,6 +53,7 @@ try {
     "apply_issue_change",
     "get_issue",
     "get_issue_capabilities",
+    "list_issue_comments",
     "list_issues",
     "list_users",
     "prepare_issue_change",

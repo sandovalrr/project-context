@@ -8,6 +8,7 @@ import {
   applyIssueOperation,
   getIssue,
   getIssueCapabilities,
+  listIssueComments,
   listIssues,
   listUsers,
   prepareIssueOperation,
@@ -106,6 +107,22 @@ const issueOptionSearchResultSchema = z.array(
   }),
 );
 const getResultSchema = z.object({ providerAlias: z.string(), issue: issueSchema });
+const issueCommentSchema = z.object({
+  provider: providerTypeSchema,
+  id: z.string(),
+  body: z.string(),
+  author: issueUserSchema.nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  url: z.string().url().nullable(),
+});
+const issueCommentListResultSchema = z.object({
+  providerAlias: z.string(),
+  providerType: providerTypeSchema,
+  issueIdentifier: z.string(),
+  comments: z.array(issueCommentSchema),
+  truncated: z.boolean(),
+});
 const issueFieldNameSchema = z.enum([
   "title",
   "description",
@@ -253,7 +270,7 @@ export function createProjectIssuesServer(): McpServer {
     { name: SERVER_NAME, version: PACKAGE_VERSION },
     {
       instructions:
-        "Resolve repository context before issue work. Use list_issues for canonical status filters and search_issues only for title or description text. Use get_issue_capabilities before creating or when exact field options are unknown, and search_issue_options when a capability points to it or its catalog is truncated. Use list_users or search_users to obtain an exact assignee value before assigning; ask the user to choose when matches are ambiguous. Reads are provider-routed. External writes require prepare_issue_change followed by apply_issue_change using the returned short-lived token.",
+        "Resolve repository context before issue work. Use list_issues for canonical status filters, search_issues only for title or description text, and list_issue_comments only for an issue's comment discussion rather than full activity history. Use get_issue_capabilities before creating or when exact field options are unknown, and search_issue_options when a capability points to it or its catalog is truncated. Use list_users or search_users to obtain an exact assignee value before assigning; ask the user to choose when matches are ambiguous. Reads are provider-routed. External writes require prepare_issue_change followed by apply_issue_change using the returned short-lived token.",
     },
   );
 
@@ -471,6 +488,31 @@ export function createProjectIssuesServer(): McpServer {
         getIssue(reference, {
           cwd: await resolveMcpWorkingDirectory(server, cwd),
           ...(provider ? { provider } : {}),
+        }),
+      ),
+  );
+
+  server.registerTool(
+    "list_issue_comments",
+    {
+      title: "List issue comments",
+      description:
+        "List target-scoped issue comments newest first. This returns comments only, not field history or a full activity timeline, and rejects GitHub pull requests.",
+      inputSchema: {
+        reference: z.string().min(1),
+        cwd: cwdSchema,
+        provider: providerSchema,
+        limit: z.number().int().min(1).max(100).optional(),
+      },
+      outputSchema: resultSchema(issueCommentListResultSchema),
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+    },
+    ({ reference, cwd, provider, limit }) =>
+      safely(async () =>
+        listIssueComments(reference, {
+          cwd: await resolveMcpWorkingDirectory(server, cwd),
+          ...(provider ? { provider } : {}),
+          ...(limit === undefined ? {} : { limit }),
         }),
       ),
   );

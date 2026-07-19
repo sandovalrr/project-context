@@ -4,6 +4,8 @@ import { filterIssueOptions, issueFieldCapability } from "./capabilities.ts";
 import { requestJson, versionOf } from "./http.ts";
 import type {
   AssignableUser,
+  IssueComment,
+  IssueCommentListResult,
   IssueCreateInput,
   IssueListOptions,
   IssueListResult,
@@ -87,6 +89,14 @@ interface JiraIssueType {
 interface JiraPriority {
   id: string;
   name: string;
+}
+
+interface JiraComment {
+  id: string;
+  body: unknown;
+  author?: JiraUser | null;
+  created: string;
+  updated: string;
 }
 
 const jiraOptionSearchMaxPages = 10;
@@ -474,6 +484,44 @@ export class JiraCloudIssuesAdapter implements IssueProviderAdapter {
         `/rest/api/3/issue/${encodeURIComponent(identifier)}?fields=${jiraIssueFields.join(",")}`,
       ),
     );
+  }
+
+  async listComments(identifier: string, limit = 30): Promise<IssueCommentListResult> {
+    await this.get(identifier);
+    const commentPath = `/rest/api/3/issue/${encodeURIComponent(identifier)}/comment`;
+    const firstParameters = new URLSearchParams({ startAt: "0", maxResults: String(limit) });
+    const firstPage = await this.#request<{
+      comments: JiraComment[];
+      total: number;
+    }>(`${commentPath}?${firstParameters}`);
+    const latestStart = Math.max(0, firstPage.total - limit);
+    const page =
+      latestStart === 0
+        ? firstPage
+        : await this.#request<{ comments: JiraComment[]; total: number }>(
+            `${commentPath}?${new URLSearchParams({
+              startAt: String(latestStart),
+              maxResults: String(limit),
+            })}`,
+          );
+    await this.get(identifier);
+
+    const comments = page.comments
+      .toSorted((left, right) => right.created.localeCompare(left.created))
+      .slice(0, limit)
+      .map(
+        (comment): IssueComment => ({
+          provider: this.type,
+          id: comment.id,
+          body: adfText(comment.body) ?? "",
+          author: comment.author ? this.#issueUser(comment.author) : null,
+          createdAt: comment.created,
+          updatedAt: comment.updated,
+          url: null,
+        }),
+      );
+
+    return { comments, truncated: page.total > comments.length };
   }
 
   async create(input: IssueCreateInput): Promise<IssueSnapshot> {
