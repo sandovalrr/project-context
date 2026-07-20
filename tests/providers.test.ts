@@ -61,7 +61,7 @@ function linearIssue(teamId: string, projectId?: string) {
       email: "richard@example.com",
       active: true,
     },
-    creator: { id: "user-1", name: "Dioni Ripoll", email: "dioni@example.com" },
+    creator: { id: "user-1", name: "John Smith", email: "john.smith@example.com" },
     state: { id: "state-1", name: "Backlog" },
     labels: { nodes: [] },
     team: { id: teamId },
@@ -91,7 +91,7 @@ describe("GitHub Issues adapter", () => {
       updated_at: "2026-07-18T10:00:00Z",
       created_at: "2026-07-17T10:00:00Z",
       assignee: { id: 2, login: "richard" },
-      user: { id: 1, login: "dioni" },
+      user: { id: 1, login: "johnsmith" },
     };
     const { fetcher, requests } = mockFetch([
       { id: 1, login: "example-user" },
@@ -109,7 +109,7 @@ describe("GitHub Issues adapter", () => {
     expect((await adapter.identity()).principalName).toBe("example-user");
     expect((await adapter.search("broken"))[0]).toMatchObject({
       assignee: { assignee: "richard", displayName: "richard" },
-      creator: { id: "1", displayName: "dioni" },
+      creator: { id: "1", displayName: "johnsmith" },
       priority: null,
       issueType: null,
       createdAt: "2026-07-17T10:00:00Z",
@@ -164,7 +164,7 @@ describe("GitHub Issues adapter", () => {
 
   test("lists and searches repository-assignable users", async () => {
     const users = [
-      { id: 1, login: "dioni" },
+      { id: 1, login: "johnsmith" },
       { id: 2, login: "richard" },
       { id: 3, login: "someone-else" },
     ];
@@ -181,9 +181,9 @@ describe("GitHub Issues adapter", () => {
       users: [
         {
           provider: "github",
-          assignee: "dioni",
-          displayName: "dioni",
-          username: "dioni",
+          assignee: "johnsmith",
+          displayName: "johnsmith",
+          username: "johnsmith",
           email: null,
           active: true,
         },
@@ -198,8 +198,8 @@ describe("GitHub Issues adapter", () => {
       ],
       truncated: true,
     });
-    expect(await adapter.searchUsers("DION", 2)).toMatchObject({
-      users: [{ assignee: "dioni" }],
+    expect(await adapter.searchUsers("JOHN", 2)).toMatchObject({
+      users: [{ assignee: "johnsmith" }],
       truncated: false,
     });
     expect(requests.map(({ url }) => decodeURIComponent(url))).toEqual([
@@ -402,7 +402,7 @@ describe("target-scoped issue comment reads", () => {
                   createdAt: "2026-07-18T10:00:00Z",
                   updatedAt: "2026-07-18T10:00:00Z",
                   url: "https://linear.app/comment/comment-1",
-                  user: { id: "user-1", name: "Dioni", email: "dioni@example.com" },
+                  user: { id: "user-1", name: "John Smith", email: "john.smith@example.com" },
                 },
                 {
                   id: "comment-2",
@@ -431,7 +431,7 @@ describe("target-scoped issue comment reads", () => {
     expect(result.truncated).toBe(true);
     expect(result.comments.map(({ id }) => id)).toEqual(["comment-2", "comment-1"]);
     expect(result.comments[0]).toMatchObject({ body: "Later", author: null });
-    expect(result.comments[1]?.author).toMatchObject({ displayName: "Dioni" });
+    expect(result.comments[1]?.author).toMatchObject({ displayName: "John Smith" });
   });
 
   test("does not expose Linear comment bodies when target validation fails", async () => {
@@ -605,7 +605,7 @@ describe("Linear adapter", () => {
     expect(await adapter.get("ENG-1")).toMatchObject({
       identifier: "ENG-1",
       assignee: { assignee: "user-2", displayName: "Richard Sandoval" },
-      creator: { id: "user-1", displayName: "Dioni Ripoll" },
+      creator: { id: "user-1", displayName: "John Smith" },
       priority: { value: 2, label: "High" },
       issueType: null,
       createdAt: "2026-07-17T10:00:00Z",
@@ -796,7 +796,7 @@ describe("Linear adapter", () => {
 
   test("lists and searches active members of the configured team", async () => {
     const users = [
-      { id: "user-1", name: "Dioni Ripoll", email: "dioni@example.com", active: true },
+      { id: "user-1", name: "John Smith", email: "john.smith@example.com", active: true },
       { id: "user-2", name: "Richard Sandoval", email: "richard@example.com", active: true },
       { id: "user-3", name: "Former User", email: "former@example.com", active: false },
     ];
@@ -816,9 +816,9 @@ describe("Linear adapter", () => {
         {
           provider: "linear",
           assignee: "user-1",
-          displayName: "Dioni Ripoll",
+          displayName: "John Smith",
           username: null,
-          email: "dioni@example.com",
+          email: "john.smith@example.com",
           active: true,
         },
       ],
@@ -942,7 +942,7 @@ describe("Jira Cloud adapter", () => {
           emailAddress: "richard@example.com",
           active: true,
         },
-        creator: { accountId: "account-dioni", displayName: "Dioni Ripoll" },
+        creator: { accountId: "account-john-smith", displayName: "John Smith" },
         priority: { id: "2", name: "High" },
         issuetype: { id: "10001", name: "Bug" },
       },
@@ -958,7 +958,7 @@ describe("Jira Cloud adapter", () => {
     expect(await adapter.create({ title: "Broken build", description: "Details" })).toMatchObject({
       description: "Details",
       assignee: { assignee: "account-richard", displayName: "Richard Sandoval" },
-      creator: { id: "account-dioni", displayName: "Dioni Ripoll" },
+      creator: { id: "account-john-smith", displayName: "John Smith" },
       priority: { value: "High", label: "High" },
       issueType: { value: "Bug", label: "Bug" },
       createdAt: "2026-07-17T10:00:00.000+0000",
@@ -1063,9 +1063,9 @@ describe("Jira Cloud adapter", () => {
   test("lists and searches users assignable to the configured project", async () => {
     const users = [
       {
-        accountId: "account-dioni",
-        displayName: "Dioni Ripoll",
-        emailAddress: "dioni@example.com",
+        accountId: "account-john-smith",
+        displayName: "John Smith",
+        emailAddress: "john.smith@example.com",
         active: true,
       },
       {
@@ -1086,10 +1086,10 @@ describe("Jira Cloud adapter", () => {
       users: [
         {
           provider: "jira-cloud",
-          assignee: "account-dioni",
-          displayName: "Dioni Ripoll",
+          assignee: "account-john-smith",
+          displayName: "John Smith",
           username: null,
-          email: "dioni@example.com",
+          email: "john.smith@example.com",
           active: true,
         },
       ],
