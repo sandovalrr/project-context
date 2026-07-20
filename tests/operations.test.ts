@@ -237,7 +237,7 @@ describe("assignable user discovery", () => {
       const fetcher = mockFetch([
         { id: 1, login: "example-user" },
         [
-          { id: 1, login: "dioni" },
+          { id: 1, login: "johnsmith" },
           { id: 2, login: "richard" },
         ],
       ]);
@@ -245,7 +245,7 @@ describe("assignable user discovery", () => {
       expect(await listUsers({ cwd: repository, limit: 1, fetcher })).toEqual([
         {
           providerAlias: "github",
-          users: [expect.objectContaining({ assignee: "dioni", provider: "github" })],
+          users: [expect.objectContaining({ assignee: "johnsmith", provider: "github" })],
           truncated: true,
         },
       ]);
@@ -257,12 +257,12 @@ describe("assignable user discovery", () => {
       const fetcher = mockFetch([
         { id: 1, login: "example-user" },
         [
-          { id: 1, login: "dioni" },
-          { id: 2, login: "dionisia" },
+          { id: 1, login: "johnsmith" },
+          { id: 2, login: "johnstone" },
         ],
       ]);
 
-      const result = await searchUsers("dioni", { cwd: repository, fetcher });
+      const result = await searchUsers("john", { cwd: repository, fetcher });
 
       expect(result[0]?.users).toHaveLength(2);
     });
@@ -272,7 +272,7 @@ describe("assignable user discovery", () => {
     await expect(listUsers({ all: true, provider: "github" })).rejects.toMatchObject({
       code: "ROUTING_CONFLICT",
     });
-    await expect(searchUsers("dioni", { limit: 0 })).rejects.toMatchObject({
+    await expect(searchUsers("john", { limit: 0 })).rejects.toMatchObject({
       code: "LIMIT_INVALID",
     });
   });
@@ -372,7 +372,7 @@ describe("issue comment reading", () => {
           {
             id: 80,
             body: "A useful comment",
-            user: { id: 2, login: "dioni" },
+            user: { id: 2, login: "johnsmith" },
             created_at: "2026-07-18T11:00:00Z",
             updated_at: "2026-07-18T11:30:00Z",
             html_url: "https://github.com/example/example-repository/issues/3#issuecomment-80",
@@ -391,7 +391,7 @@ describe("issue comment reading", () => {
         providerAlias: "github",
         providerType: "github",
         issueIdentifier: "#3",
-        comments: [{ id: "80", body: "A useful comment", author: { username: "dioni" } }],
+        comments: [{ id: "80", body: "A useful comment", author: { username: "johnsmith" } }],
         truncated: false,
       });
       await expect(readFile(getPaths().auditFile, "utf8")).rejects.toThrow();

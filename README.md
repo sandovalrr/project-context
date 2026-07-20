@@ -63,7 +63,7 @@ project-context setup --guided
 project-context config validate
 project-context resolve --cwd /path/to/repository
 project-context issue list --status open --status in_progress
-project-context issue user search "Dioni"
+project-context issue user search "John Smith"
 project-context issue capabilities
 project-context issue option search labels security
 project-context issue comment list github:#42 --limit 20
