@@ -1,6 +1,6 @@
 {
   "name": "@sandovalrr/project-context-mcp",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": false,
   "description": "Provider-neutral MCP server for safe repository-scoped issue handling",
   "mcpName": "io.github.sandovalrr/project-context",

@@ -1,3 +1,12 @@
+# [0.4.0](https://github.com/sandovalrr/project-context/compare/v0.3.0...v0.4.0) (2026-07-22)
+
+
+### Features
+
+* **github:** add native issue management parity ([#31](https://github.com/sandovalrr/project-context/issues/31)) ([ca0d6a6](https://github.com/sandovalrr/project-context/commit/ca0d6a65b7e64936f24984dce47431dbc5074183))
+* **linear:** delegate issue operations to hosted MCP ([#29](https://github.com/sandovalrr/project-context/issues/29)) ([7a94dbb](https://github.com/sandovalrr/project-context/commit/7a94dbb3bd1913e2fb6e9061fd9253508fabdac2))
+* **linear:** support team-wide and multi-project targets ([#28](https://github.com/sandovalrr/project-context/issues/28)) ([1f39fd6](https://github.com/sandovalrr/project-context/commit/1f39fd68dd366b6e36e5809d51ad4ace91881663))
+
 # [0.3.0](https://github.com/sandovalrr/project-context/compare/v0.2.0...v0.3.0) (2026-07-22)
 
 
