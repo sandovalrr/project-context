@@ -45,6 +45,8 @@ complete Codex, Claude, Zed, and VS Code configurations are in
   argv-only commands. Literal secrets in YAML are rejected.
 - Provider calls are restricted to fixed HTTPS origins, reject redirects, cap
   response sizes and timeouts, and never automatically retry writes.
+- Linear issue operations use a fixed allowlist of Linear's hosted MCP tools;
+  project-context never proxies the upstream server's broader tool catalog.
 - Prepared writes expire after ten minutes, are encrypted with AES-256-GCM,
   and can be claimed only once. An uncertain apply result becomes
   `indeterminate` and is never replayed automatically.

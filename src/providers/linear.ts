@@ -1,7 +1,13 @@
+import { z } from "zod";
 import { ProjectContextError } from "../core/errors.ts";
-import type { LinearProjectProvider, LinearProviderProfile } from "../core/types.ts";
+import type { LinearProjectProvider, LinearProviderProfile, StatusMatch } from "../core/types.ts";
 import { filterIssueOptions, issueFieldCapability } from "./capabilities.ts";
 import { requestJson, versionOf } from "./http.ts";
+import {
+  HostedLinearMcpConnector,
+  type LinearMcpConnector,
+  type LinearMcpSession,
+} from "./linear-mcp.ts";
 import type {
   AssignableUser,
   IssueComment,
@@ -14,34 +20,13 @@ import type {
   IssueProviderAdapter,
   IssueSnapshot,
   IssueUpdateInput,
-  IssueUser,
   ProviderIdentity,
   ProviderIssueCapabilities,
   UserListResult,
 } from "./types.ts";
 
-function linearStatusFilter(match: NonNullable<IssueListOptions["matches"]>[number]) {
-  const states = match.states ?? (match.state ? [match.state] : []);
-  const stateCondition =
-    states.length === 0
-      ? []
-      : states.length === 1
-        ? [{ state: { name: { eqIgnoreCase: states[0] } } }]
-        : [
-            {
-              or: states.map((state) => ({ state: { name: { eqIgnoreCase: state } } })),
-            },
-          ];
-  const conditions = [
-    ...stateCondition,
-    ...match.labelsAll.map((label) => ({ labels: { name: { eqIgnoreCase: label } } })),
-    ...match.labelsNone.map((label) => ({
-      labels: { every: { name: { neqIgnoreCase: label } } },
-    })),
-  ];
-
-  return conditions.length === 1 ? conditions[0] : { and: conditions };
-}
+const MAX_MCP_PAGES = 10;
+const MCP_PAGE_SIZE = 250;
 
 const linearPriorities = [
   { value: 0, label: "No priority" },
@@ -51,58 +36,166 @@ const linearPriorities = [
   { value: 4, label: "Low" },
 ];
 
-interface LinearIssue {
-  id: string;
-  identifier: string;
-  title: string;
-  description: string | null;
-  url: string;
-  updatedAt: string;
-  createdAt?: string;
-  dueDate?: string | null;
-  priority?: number;
-  priorityLabel?: string;
-  assignee?: LinearAssignableUser | null;
-  creator?: Omit<LinearAssignableUser, "active"> | null;
-  state: { id: string; name: string };
-  team?: { id: string };
-  project?: { id: string } | null;
-  labels?: { nodes: Array<{ name: string }> };
+const linearMcpIssueSchema = z
+  .object({
+    id: z.string().min(1),
+    title: z.string(),
+    description: z.string().nullable().optional(),
+    priority: z.object({ value: z.number(), name: z.string() }).nullable().optional(),
+    url: z.string().url(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+    dueDate: z.string().nullable().optional(),
+    status: z.string(),
+    labels: z.array(z.string()).optional(),
+    assignee: z.string().nullable().optional(),
+    assigneeId: z.string().nullable().optional(),
+    createdBy: z.string().nullable().optional(),
+    createdById: z.string().nullable().optional(),
+    projectId: z.string().nullable().optional(),
+    teamId: z.string().min(1),
+  })
+  .passthrough();
+const linearMcpIssuePageSchema = z
+  .object({
+    issues: z.array(linearMcpIssueSchema),
+    hasNextPage: z.boolean(),
+    cursor: z.string().nullable().optional(),
+  })
+  .passthrough();
+const linearMcpUserSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string(),
+    displayName: z.string().optional(),
+    email: z.string().optional(),
+    isActive: z.boolean(),
+  })
+  .passthrough();
+const linearMcpUserPageSchema = z
+  .object({
+    users: z.array(linearMcpUserSchema),
+    hasNextPage: z.boolean(),
+    cursor: z.string().nullable().optional(),
+  })
+  .passthrough();
+const linearMcpIdentitySchema = linearMcpUserSchema.extend({
+  email: z.string(),
+});
+const linearMcpLabelSchema = z
+  .object({ id: z.string().min(1), name: z.string().min(1) })
+  .passthrough();
+const linearMcpLabelPageSchema = z
+  .object({
+    labels: z.array(linearMcpLabelSchema),
+    hasNextPage: z.boolean(),
+    cursor: z.string().nullable().optional(),
+  })
+  .passthrough();
+const linearMcpStatusSchema = z
+  .object({ id: z.string().min(1), name: z.string().min(1), type: z.string() })
+  .passthrough();
+const linearMcpStatusesSchema = z.array(linearMcpStatusSchema);
+const linearMcpCommentSchema = z
+  .object({
+    id: z.string().min(1),
+    body: z.string(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+    author: z.object({ id: z.string(), name: z.string() }).nullable().optional(),
+  })
+  .passthrough();
+const linearMcpCommentPageSchema = z
+  .object({
+    comments: z.array(linearMcpCommentSchema),
+    hasNextPage: z.boolean(),
+    cursor: z.string().nullable().optional(),
+  })
+  .passthrough();
+const linearMcpSavedIssueSchema = z.object({ id: z.string().min(1) }).passthrough();
+
+type LinearMcpIssue = z.infer<typeof linearMcpIssueSchema>;
+type LinearMcpUser = z.infer<typeof linearMcpUserSchema>;
+type LinearMcpLabel = z.infer<typeof linearMcpLabelSchema>;
+
+interface CollectedIssues {
+  issues: LinearMcpIssue[];
+  truncated: boolean;
 }
 
-interface LinearAssignableUser {
-  id: string;
-  name: string;
-  email: string;
-  active: boolean;
+interface CollectedUsers {
+  users: LinearMcpUser[];
+  truncated: boolean;
 }
 
-interface LinearUserPage {
-  nodes: LinearAssignableUser[];
-  pageInfo: { hasNextPage: boolean; endCursor?: string | null };
+interface CollectedLabels {
+  labels: LinearMcpLabel[];
+  truncated: boolean;
 }
 
-interface LinearComment {
-  id: string;
-  body: string;
-  createdAt: string;
-  updatedAt: string;
-  url?: string | null;
-  user?: Omit<LinearAssignableUser, "active"> | null;
+function parseLinearMcpOutput<T>(schema: z.ZodType<T>, value: unknown): T {
+  const parsed = schema.safeParse(value);
+  if (parsed.success) return parsed.data;
+
+  throw new ProjectContextError(
+    "LINEAR_MCP_RESPONSE_INVALID",
+    "Linear MCP returned a response that does not match the required issue contract",
+  );
+}
+
+function normalized(value: string): string {
+  return value.trim().toLocaleLowerCase();
+}
+
+function sameName(left: string, right: string): boolean {
+  return left.localeCompare(right, undefined, { sensitivity: "accent" }) === 0;
+}
+
+function matchesStatus(issue: LinearMcpIssue, matches: StatusMatch[]): boolean {
+  if (matches.length === 0) return true;
+
+  const labels = issue.labels ?? [];
+
+  return matches.some((match) => {
+    const states = match.states ?? (match.state ? [match.state] : []);
+    const stateMatches =
+      states.length === 0 || states.some((state) => sameName(state, issue.status));
+    const includedLabelsMatch = match.labelsAll.every((label) =>
+      labels.some((candidate) => sameName(candidate, label)),
+    );
+    const excludedLabelsMatch = match.labelsNone.every(
+      (label) => !labels.some((candidate) => sameName(candidate, label)),
+    );
+
+    return stateMatches && includedLabelsMatch && excludedLabelsMatch;
+  });
+}
+
+function pageSize(limit: number): number {
+  return Math.min(Math.max(limit + 1, 50), MCP_PAGE_SIZE);
 }
 
 export class LinearIssuesAdapter implements IssueProviderAdapter {
   readonly type = "linear" as const;
+
+  private readonly connector: LinearMcpConnector;
 
   constructor(
     _profile: LinearProviderProfile,
     private readonly target: LinearProjectProvider["target"],
     private readonly credential: Record<string, string>,
     private readonly fetcher: typeof fetch = fetch,
-  ) {}
+    connector?: LinearMcpConnector,
+  ) {
+    this.connector =
+      connector ?? new HostedLinearMcpConnector(this.credential.token ?? "", this.fetcher);
+  }
 
-  async #graphql<T>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
-    const result = await requestJson<{ data?: T; errors?: Array<{ message: string }> }>(
+  async #organization(): Promise<{ id: string; name: string }> {
+    const result = await requestJson<{
+      data?: { organization: { id: string; name: string } };
+      errors?: Array<{ message: string }>;
+    }>(
       this.fetcher,
       "https://api.linear.app/graphql",
       {
@@ -111,40 +204,56 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
           Authorization: this.credential.token ?? "",
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ query, variables }),
+        body: JSON.stringify({
+          query: "query Identity { organization { id name } }",
+          variables: {},
+        }),
       },
-      {
-        provider: "Linear",
-        allowedOrigin: "https://api.linear.app",
-        access: query.trimStart().startsWith("mutation") ? "write" : "read",
-      },
+      { provider: "Linear", allowedOrigin: "https://api.linear.app", access: "read" },
     );
     if (result.errors?.length || !result.data) {
       throw new ProjectContextError(
         "LINEAR_GRAPHQL_ERROR",
-        "Linear GraphQL request failed; provider response details were redacted",
+        "Linear workspace identity query failed; provider response details were redacted",
       );
     }
-    return result.data;
+
+    return result.data.organization;
   }
 
-  #snapshot(issue: LinearIssue): IssueSnapshot {
+  #snapshot(issue: LinearMcpIssue): IssueSnapshot {
     return {
       provider: this.type,
       id: issue.id,
-      identifier: issue.identifier,
+      identifier: issue.id,
       title: issue.title,
-      description: issue.description,
-      status: issue.state.name,
-      labels: issue.labels?.nodes.map((label) => label.name) ?? [],
-      assignee: issue.assignee ? this.#assignableUser(issue.assignee) : null,
-      creator: issue.creator ? this.#issueUser(issue.creator) : null,
-      priority:
-        issue.priority === undefined
-          ? null
-          : { value: issue.priority, label: issue.priorityLabel ?? String(issue.priority) },
+      description: issue.description ?? null,
+      status: issue.status,
+      labels: issue.labels ?? [],
+      assignee:
+        issue.assigneeId && issue.assignee
+          ? {
+              provider: this.type,
+              assignee: issue.assigneeId,
+              displayName: issue.assignee,
+              username: null,
+              email: null,
+              active: true,
+            }
+          : null,
+      creator:
+        issue.createdById && issue.createdBy
+          ? {
+              provider: this.type,
+              id: issue.createdById,
+              displayName: issue.createdBy,
+              username: null,
+              email: null,
+            }
+          : null,
+      priority: issue.priority ? { value: issue.priority.value, label: issue.priority.name } : null,
       issueType: null,
-      createdAt: issue.createdAt ?? null,
+      createdAt: issue.createdAt,
       dueDate: issue.dueDate ?? null,
       url: issue.url,
       updatedAt: issue.updatedAt,
@@ -152,108 +261,19 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
     };
   }
 
-  #assignableUser(user: LinearAssignableUser): AssignableUser {
-    return {
-      provider: this.type,
-      assignee: user.id,
-      displayName: user.name,
-      username: null,
-      email: user.email || null,
-      active: user.active,
-    };
-  }
-
-  #issueUser(user: Omit<LinearAssignableUser, "active">): IssueUser {
-    return {
-      provider: this.type,
-      id: user.id,
-      displayName: user.name,
-      username: null,
-      email: user.email || null,
-    };
-  }
-
-  async #userPage(first: number, after?: string): Promise<LinearUserPage> {
-    const data = await this.#graphql<{ team: { members: LinearUserPage } }>(
-      `query TeamUsers($teamId: String!, $first: Int!, $after: String) {
-        team(id: $teamId) {
-          members(first: $first, after: $after) {
-            nodes { id name email active }
-            pageInfo { hasNextPage endCursor }
-          }
-        }
-      }`,
-      { teamId: this.target.team.id, first, ...(after ? { after } : {}) },
-    );
-
-    return data.team.members;
-  }
-
-  async #collectAssignableUsers(
-    query: string | undefined,
-    limit: number,
-    after?: string,
-    collected: LinearAssignableUser[] = [],
-  ): Promise<LinearAssignableUser[]> {
-    const pageSize = query ? 100 : Math.min(limit + 1, 100);
-    const page = await this.#userPage(pageSize, after);
-    const normalizedQuery = query?.trim().toLocaleLowerCase();
-    const activeUsers = page.nodes.filter((user) => user.active);
-    const matches = normalizedQuery
-      ? activeUsers.filter((user) =>
-          [user.name, user.email].some((value) =>
-            value.toLocaleLowerCase().includes(normalizedQuery),
-          ),
-        )
-      : activeUsers;
-    const users = [...collected, ...matches];
-    const nextCursor = page.pageInfo.endCursor;
-
-    if (users.length > limit || !page.pageInfo.hasNextPage || !nextCursor) return users;
-    return this.#collectAssignableUsers(query, limit, nextCursor, users);
-  }
-
-  async #users(query: string | undefined, limit: number): Promise<UserListResult> {
-    const users = await this.#collectAssignableUsers(query, limit);
-
-    return {
-      users: users.slice(0, limit).map((user) => this.#assignableUser(user)),
-      truncated: users.length > limit,
-    };
-  }
-
-  #targetFilter(): Record<string, unknown> {
+  #projectMatches(issue: LinearMcpIssue): boolean {
     const project = this.target.project;
-
-    if (project === "any") {
-      return { team: { id: { eq: this.target.team.id } } };
+    if (project === "any") return true;
+    if (project === "none") return !issue.projectId;
+    if ("include" in project) {
+      return project.include.some(({ id }) => id === issue.projectId);
     }
 
-    const projectFilter =
-      project === "none"
-        ? { null: true }
-        : "include" in project
-          ? { id: { in: project.include.map(({ id }) => id) } }
-          : { id: { eq: project.id } };
-
-    return {
-      team: { id: { eq: this.target.team.id } },
-      project: projectFilter,
-    };
+    return issue.projectId === project.id;
   }
 
-  #assertTarget(issue: LinearIssue): void {
-    const project = this.target.project;
-    const teamMatches = issue.team?.id === this.target.team.id;
-    const projectMatches =
-      project === "any" ||
-      (Object.hasOwn(issue, "project") &&
-        (project === "none"
-          ? issue.project === null
-          : "include" in project
-            ? project.include.some(({ id }) => id === issue.project?.id)
-            : issue.project?.id === project.id));
-    if (teamMatches && projectMatches) return;
+  #assertTarget(issue: LinearMcpIssue): void {
+    if (issue.teamId === this.target.team.id && this.#projectMatches(issue)) return;
 
     throw new ProjectContextError(
       "ISSUE_OUTSIDE_TARGET",
@@ -261,27 +281,204 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
     );
   }
 
-  #targetedSnapshot(issue: LinearIssue): IssueSnapshot {
+  #targetedSnapshot(issue: LinearMcpIssue): IssueSnapshot {
     this.#assertTarget(issue);
     return this.#snapshot(issue);
   }
 
-  #comment(comment: LinearComment): IssueComment {
+  #projectStreams(): Array<string | undefined> {
+    const project = this.target.project;
+    if (typeof project === "string") return [undefined];
+    if ("include" in project) return project.include.map(({ id }) => id);
+
+    return [project.id];
+  }
+
+  #creationProject(): string | undefined {
+    const project = this.target.project;
+    if (typeof project === "string") return undefined;
+    if ("include" in project) return project.create_in;
+
+    return project.id;
+  }
+
+  #issuesFromPage(page: LinearMcpIssue[], projectId: string | undefined): LinearMcpIssue[] {
+    for (const issue of page) {
+      if (issue.teamId !== this.target.team.id) {
+        throw new ProjectContextError(
+          "ISSUE_OUTSIDE_TARGET",
+          "Linear MCP returned an issue outside the configured team",
+        );
+      }
+      if (this.target.project !== "none" && !this.#projectMatches(issue)) {
+        throw new ProjectContextError(
+          "ISSUE_OUTSIDE_TARGET",
+          `Linear MCP returned an issue outside the configured project${projectId ? ` ${projectId}` : ""}`,
+        );
+      }
+    }
+
+    return this.target.project === "none" ? page.filter((issue) => !issue.projectId) : page;
+  }
+
+  async #collectIssueStream(
+    session: LinearMcpSession,
+    desired: number,
+    matches: StatusMatch[],
+    projectId: string | undefined,
+    query: string | undefined,
+    cursor?: string,
+    collected: LinearMcpIssue[] = [],
+    pages = 0,
+  ): Promise<CollectedIssues> {
+    const value = await session.call("list_issues", {
+      team: this.target.team.id,
+      limit: pageSize(desired),
+      orderBy: "updatedAt",
+      includeArchived: false,
+      ...(projectId ? { project: projectId } : {}),
+      ...(query ? { query } : {}),
+      ...(cursor ? { cursor } : {}),
+    });
+    const page = parseLinearMcpOutput(linearMcpIssuePageSchema, value);
+    const issues = this.#issuesFromPage(page.issues, projectId).filter((issue) =>
+      matchesStatus(issue, matches),
+    );
+    const combined = [...collected, ...issues];
+
+    if (combined.length >= desired) return { issues: combined, truncated: true };
+    if (!page.hasNextPage) return { issues: combined, truncated: false };
+    if (!page.cursor || pages + 1 >= MAX_MCP_PAGES) {
+      return { issues: combined, truncated: true };
+    }
+
+    return this.#collectIssueStream(
+      session,
+      desired,
+      matches,
+      projectId,
+      query,
+      page.cursor,
+      combined,
+      pages + 1,
+    );
+  }
+
+  async #collectIssues(
+    session: LinearMcpSession,
+    limit: number,
+    matches: StatusMatch[],
+    query?: string,
+  ): Promise<CollectedIssues> {
+    const streams = await Promise.all(
+      this.#projectStreams().map((projectId) =>
+        this.#collectIssueStream(session, limit + 1, matches, projectId, query),
+      ),
+    );
+    const unique = new Map(
+      streams.flatMap(({ issues }) => issues).map((issue) => [issue.id, issue]),
+    );
+    const issues = [...unique.values()].toSorted((left, right) =>
+      right.updatedAt.localeCompare(left.updatedAt),
+    );
+
     return {
-      provider: this.type,
-      id: comment.id,
-      body: comment.body,
-      author: comment.user ? this.#issueUser(comment.user) : null,
-      createdAt: comment.createdAt,
-      updatedAt: comment.updatedAt,
-      url: comment.url ?? null,
+      issues: issues.slice(0, limit),
+      truncated: issues.length > limit || streams.some(({ truncated }) => truncated),
     };
   }
 
+  async #collectUsers(
+    session: LinearMcpSession,
+    limit: number,
+    query?: string,
+    cursor?: string,
+    collected: LinearMcpUser[] = [],
+    pages = 0,
+  ): Promise<CollectedUsers> {
+    const value = await session.call("list_users", {
+      team: this.target.team.id,
+      limit: pageSize(limit),
+      ...(query ? { query } : {}),
+      ...(cursor ? { cursor } : {}),
+    });
+    const page = parseLinearMcpOutput(linearMcpUserPageSchema, value);
+    const normalizedQuery = query ? normalized(query) : undefined;
+    const users = page.users.filter(
+      (user) =>
+        user.isActive &&
+        (!normalizedQuery ||
+          [user.name, user.displayName ?? "", user.email ?? ""].some((field) =>
+            normalized(field).includes(normalizedQuery),
+          )),
+    );
+    const combined = [...collected, ...users];
+
+    if (combined.length > limit) return { users: combined, truncated: true };
+    if (!page.hasNextPage) return { users: combined, truncated: false };
+    if (!page.cursor || pages + 1 >= MAX_MCP_PAGES) {
+      return { users: combined, truncated: true };
+    }
+
+    return this.#collectUsers(session, limit, query, page.cursor, combined, pages + 1);
+  }
+
+  async #collectLabels(
+    session: LinearMcpSession,
+    limit: number,
+    query?: string,
+    cursor?: string,
+    collected: LinearMcpLabel[] = [],
+    pages = 0,
+  ): Promise<CollectedLabels> {
+    const value = await session.call("list_issue_labels", {
+      team: this.target.team.id,
+      limit: pageSize(limit),
+      ...(query ? { name: query } : {}),
+      ...(cursor ? { cursor } : {}),
+    });
+    const page = parseLinearMcpOutput(linearMcpLabelPageSchema, value);
+    const labels = query
+      ? page.labels.filter(({ name }) => normalized(name).includes(normalized(query)))
+      : page.labels;
+    const combined = [...collected, ...labels];
+
+    if (combined.length > limit) return { labels: combined, truncated: true };
+    if (!page.hasNextPage) return { labels: combined, truncated: false };
+    if (!page.cursor || pages + 1 >= MAX_MCP_PAGES) {
+      return { labels: combined, truncated: true };
+    }
+
+    return this.#collectLabels(session, limit, query, page.cursor, combined, pages + 1);
+  }
+
+  #assignableUser(user: LinearMcpUser): AssignableUser {
+    return {
+      provider: this.type,
+      assignee: user.id,
+      displayName: user.displayName || user.name,
+      username: null,
+      email: user.email || null,
+      active: user.isActive,
+    };
+  }
+
+  async #users(query: string | undefined, limit: number): Promise<UserListResult> {
+    return this.connector.withSession(async (session) => {
+      const result = await this.#collectUsers(session, limit, query);
+
+      return {
+        users: result.users.slice(0, limit).map((user) => this.#assignableUser(user)),
+        truncated: result.truncated,
+      };
+    });
+  }
+
   #priority(value: string | number): number {
-    if (typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 4)
+    if (typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 4) {
       return value;
-    const normalized = String(value).trim().toLowerCase().replaceAll("_", " ");
+    }
+
     const priorities: Record<string, number> = {
       "no priority": 0,
       none: 0,
@@ -290,155 +487,104 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
       medium: 3,
       low: 4,
     };
-    const priority = priorities[normalized];
+    const priority = priorities[String(value).trim().toLowerCase().replaceAll("_", " ")];
     if (priority === undefined) {
       throw new ProjectContextError(
         "LINEAR_PRIORITY_INVALID",
         `Unsupported Linear priority ${value}; use none, urgent, high, medium, low, or 0-4`,
       );
     }
+
     return priority;
   }
 
-  async #labels(): Promise<Array<{ id: string; name: string }>> {
-    const data = await this.#graphql<{
-      issueLabels: { nodes: Array<{ id: string; name: string }> };
-    }>(
-      `query Labels($teamId: ID!) {
-        issueLabels(filter: { team: { id: { eq: $teamId } } }) { nodes { id name } }
-      }`,
-      { teamId: this.target.team.id },
-    );
+  async #resolvedLabels(session: LinearMcpSession, names: string[]): Promise<string[]> {
+    const resolutions = await Promise.all(
+      names.map(async (name) => {
+        const result = await this.#collectLabels(session, MCP_PAGE_SIZE, name);
+        const matches = result.labels.filter((label) => sameName(label.name, name));
 
-    return data.issueLabels.nodes;
-  }
-
-  async #capabilityLabels(): Promise<{
-    labels: Array<{ id: string; name: string }>;
-    truncated: boolean;
-  }> {
-    const data = await this.#graphql<{
-      issueLabels: {
-        nodes: Array<{ id: string; name: string }>;
-        pageInfo: { hasNextPage: boolean };
-      };
-    }>(
-      `query CapabilityLabels($teamId: ID!, $first: Int!) {
-        issueLabels(filter: { team: { id: { eq: $teamId } } }, first: $first) {
-          nodes { id name }
-          pageInfo { hasNextPage }
+        if (result.truncated || matches.length !== 1) {
+          throw new ProjectContextError(
+            "LINEAR_LABEL_AMBIGUOUS",
+            `Linear label ${name} could not be resolved uniquely inside the configured team`,
+          );
         }
-      }`,
-      { teamId: this.target.team.id, first: 101 },
+
+        return matches[0]?.name as string;
+      }),
     );
 
-    return {
-      labels: data.issueLabels.nodes.slice(0, 100),
-      truncated: data.issueLabels.pageInfo.hasNextPage || data.issueLabels.nodes.length > 100,
-    };
+    return resolutions;
   }
 
-  async #labelIds(names: string[]): Promise<string[]> {
-    const labels = await this.#labels();
-    return names.map((name) => {
-      const matches = labels.filter(
-        (label) => label.name.localeCompare(name, undefined, { sensitivity: "accent" }) === 0,
-      );
-      if (matches.length !== 1) {
-        throw new ProjectContextError(
-          "LINEAR_LABEL_AMBIGUOUS",
-          `Linear label ${name} resolved to ${matches.length} labels`,
-        );
-      }
-      return matches[0]?.id as string;
-    });
-  }
-
-  async #input(input: IssueUpdateInput | IssueCreateInput): Promise<Record<string, unknown>> {
+  async #input(
+    session: LinearMcpSession,
+    input: IssueUpdateInput | IssueCreateInput,
+  ): Promise<Record<string, unknown>> {
     if ("issueType" in input && input.issueType !== undefined) {
       throw new ProjectContextError(
         "FIELD_UNSUPPORTED",
         "Linear does not support the generic issueType field",
       );
     }
+
     return {
       ...(input.title === undefined ? {} : { title: input.title }),
       ...(input.description === undefined ? {} : { description: input.description }),
       ...(input.priority === undefined ? {} : { priority: this.#priority(input.priority) }),
-      ...(input.assignee === undefined ? {} : { assigneeId: input.assignee }),
-      ...(input.labels === undefined ? {} : { labelIds: await this.#labelIds(input.labels) }),
+      ...(input.assignee === undefined ? {} : { assignee: input.assignee }),
+      ...(input.labels === undefined
+        ? {}
+        : { labels: await this.#resolvedLabels(session, input.labels) }),
     };
+  }
+
+  async #get(session: LinearMcpSession, identifier: string): Promise<LinearMcpIssue> {
+    const issue = parseLinearMcpOutput(
+      linearMcpIssueSchema,
+      await session.call("get_issue", { id: identifier }),
+    );
+    this.#assertTarget(issue);
+
+    return issue;
   }
 
   async identity(): Promise<ProviderIdentity> {
-    const data = await this.#graphql<{
-      viewer: { id: string; name: string; email: string };
-      organization: { id: string; name: string };
-    }>("query Identity { viewer { id name email } organization { id name } }");
-    return {
-      provider: this.type,
-      principalId: data.viewer.id,
-      principalName: data.viewer.email || data.viewer.name,
-      scopeId: data.organization.id,
-      scopeName: data.organization.name,
-    };
+    return this.connector.withSession(async (session) => {
+      const [userValue, organization] = await Promise.all([
+        session.call("get_user", { query: "me" }),
+        this.#organization(),
+      ]);
+      const user = parseLinearMcpOutput(linearMcpIdentitySchema, userValue);
+
+      return {
+        provider: this.type,
+        principalId: user.id,
+        principalName: user.email || user.displayName || user.name,
+        scopeId: organization.id,
+        scopeName: organization.name,
+      };
+    });
   }
 
   async list(options: IssueListOptions = {}): Promise<IssueListResult> {
-    const limit = options.limit ?? 30;
-    const matches = options.matches?.map(linearStatusFilter) ?? [];
-    const filter = {
-      ...this.#targetFilter(),
-      ...(matches.length === 0 ? {} : { or: matches }),
-    };
-    const data = await this.#graphql<{
-      issues: { nodes: LinearIssue[]; pageInfo: { hasNextPage: boolean } };
-    }>(
-      `query List($filter: IssueFilter!, $first: Int!) {
-        issues(filter: $filter, first: $first, orderBy: updatedAt) {
-          nodes {
-            id identifier title description url updatedAt createdAt dueDate priority priorityLabel
-            state { id name } labels { nodes { name } }
-            assignee { id name email active }
-            creator { id name email }
-            team { id }
-            project { id }
-          }
-          pageInfo { hasNextPage }
-        }
-      }`,
-      { filter, first: limit },
-    );
-    const issues = data.issues.nodes.map((issue) => this.#targetedSnapshot(issue));
+    return this.connector.withSession(async (session) => {
+      const result = await this.#collectIssues(session, options.limit ?? 30, options.matches ?? []);
 
-    return { issues, truncated: data.issues.pageInfo.hasNextPage };
+      return {
+        issues: result.issues.map((issue) => this.#targetedSnapshot(issue)),
+        truncated: result.truncated,
+      };
+    });
   }
 
   async search(query: string, limit = 30): Promise<IssueSnapshot[]> {
-    const filter = {
-      ...this.#targetFilter(),
-      or: [
-        { title: { containsIgnoreCase: query } },
-        { description: { containsIgnoreCase: query } },
-      ],
-    };
+    return this.connector.withSession(async (session) => {
+      const result = await this.#collectIssues(session, limit, [], query);
 
-    const data = await this.#graphql<{ issues: { nodes: LinearIssue[] } }>(
-      `query Search($filter: IssueFilter!, $first: Int!) {
-        issues(filter: $filter, first: $first) {
-          nodes {
-            id identifier title description url updatedAt createdAt dueDate priority priorityLabel
-            state { id name } labels { nodes { name } }
-            assignee { id name email active }
-            creator { id name email }
-            team { id }
-            project { id }
-          }
-        }
-      }`,
-      { filter, first: limit },
-    );
-    return data.issues.nodes.map((issue) => this.#targetedSnapshot(issue));
+      return result.issues.map((issue) => this.#targetedSnapshot(issue));
+    });
   }
 
   listUsers(limit = 30): Promise<UserListResult> {
@@ -461,208 +607,148 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
         `Linear does not expose searchable ${field} options`,
       );
     }
-    const data = await this.#graphql<{
-      issueLabels: {
-        nodes: Array<{ id: string; name: string }>;
-        pageInfo: { hasNextPage: boolean };
-      };
-    }>(
-      `query SearchOptions($teamId: ID!, $query: String!, $first: Int!) {
-        issueLabels(
-          filter: {
-            team: { id: { eq: $teamId } }
-            name: { containsIgnoreCase: $query }
-          }
-          first: $first
-        ) {
-          nodes { id name }
-          pageInfo { hasNextPage }
-        }
-      }`,
-      { teamId: this.target.team.id, query, first: limit + 1 },
-    );
-    const options = data.issueLabels.nodes.map((label) => ({
-      value: label.name,
-      label: label.name,
-    }));
 
-    return {
-      options: options.slice(0, limit),
-      truncated: data.issueLabels.pageInfo.hasNextPage || options.length > limit,
-    };
+    return this.connector.withSession(async (session) => {
+      const result = await this.#collectLabels(session, limit, query);
+
+      return {
+        options: result.labels.slice(0, limit).map((label) => ({
+          value: label.name,
+          label: label.name,
+        })),
+        truncated: result.truncated,
+      };
+    });
   }
 
   async capabilities(): Promise<ProviderIssueCapabilities> {
-    const labelResult = await this.#capabilityLabels();
+    return this.connector.withSession(async (session) => {
+      const result = await this.#collectLabels(session, 100);
 
-    return {
-      fields: [
-        issueFieldCapability("title", ["create", "update"]),
-        issueFieldCapability("description", ["create", "update"]),
-        issueFieldCapability("labels", ["create", "update"], {
-          options: labelResult.labels.map((label) => ({ value: label.name, label: label.name })),
-          optionsTruncated: labelResult.truncated,
-          discoveryTool: "search_issue_options",
-        }),
-        issueFieldCapability("assignee", ["create", "update"], {
-          clearable: true,
-          discoveryTool: "search_users",
-        }),
-        issueFieldCapability("priority", ["create", "update"], {
-          options: linearPriorities,
-          defaultValue: 0,
-          clearable: true,
-          discoveryTool: "search_issue_options",
-        }),
-        issueFieldCapability("issueType", []),
-      ],
-    };
+      return {
+        fields: [
+          issueFieldCapability("title", ["create", "update"]),
+          issueFieldCapability("description", ["create", "update"]),
+          issueFieldCapability("labels", ["create", "update"], {
+            options: result.labels.slice(0, 100).map((label) => ({
+              value: label.name,
+              label: label.name,
+            })),
+            optionsTruncated: result.truncated,
+            discoveryTool: "search_issue_options",
+          }),
+          issueFieldCapability("assignee", ["create", "update"], {
+            clearable: true,
+            discoveryTool: "search_users",
+          }),
+          issueFieldCapability("priority", ["create", "update"], {
+            options: linearPriorities,
+            defaultValue: 0,
+            clearable: true,
+            discoveryTool: "search_issue_options",
+          }),
+          issueFieldCapability("issueType", []),
+        ],
+      };
+    });
   }
 
   async get(identifier: string): Promise<IssueSnapshot> {
-    const data = await this.#graphql<{ issue: LinearIssue }>(
-      `query Issue($id: String!) {
-        issue(id: $id) {
-          id identifier title description url updatedAt createdAt dueDate priority priorityLabel
-          state { id name } labels { nodes { name } }
-          assignee { id name email active }
-          creator { id name email }
-          team { id }
-          project { id }
-        }
-      }`,
-      { id: identifier },
+    return this.connector.withSession(async (session) =>
+      this.#snapshot(await this.#get(session, identifier)),
     );
-    return this.#targetedSnapshot(data.issue);
   }
 
   async listComments(identifier: string, limit = 30): Promise<IssueCommentListResult> {
-    const data = await this.#graphql<{
-      issue: LinearIssue & {
-        comments: {
-          nodes: LinearComment[];
-          pageInfo: { hasPreviousPage: boolean };
-        };
-      };
-    }>(
-      `query IssueComments($id: String!, $last: Int!) {
-        issue(id: $id) {
-          id identifier
-          team { id }
-          project { id }
-          comments(last: $last) {
-            nodes {
-              id body createdAt updatedAt url
-              user { id name email }
-            }
-            pageInfo { hasPreviousPage }
-          }
-        }
-      }`,
-      { id: identifier, last: limit },
-    );
-    this.#assertTarget(data.issue);
-
-    return {
-      comments: data.issue.comments.nodes
+    return this.connector.withSession(async (session) => {
+      await this.#get(session, identifier);
+      const value = await session.call("list_comments", {
+        issueId: identifier,
+        limit: Math.min(limit + 1, MCP_PAGE_SIZE),
+        orderBy: "updatedAt",
+      });
+      const page = parseLinearMcpOutput(linearMcpCommentPageSchema, value);
+      await this.#get(session, identifier);
+      const comments: IssueComment[] = page.comments
         .toSorted((left, right) => right.createdAt.localeCompare(left.createdAt))
-        .map((comment) => this.#comment(comment)),
-      truncated: data.issue.comments.pageInfo.hasPreviousPage,
-    };
+        .slice(0, limit)
+        .map((comment) => ({
+          provider: this.type,
+          id: comment.id,
+          body: comment.body,
+          author: comment.author
+            ? {
+                provider: this.type,
+                id: comment.author.id,
+                displayName: comment.author.name,
+                username: null,
+                email: null,
+              }
+            : null,
+          createdAt: comment.createdAt,
+          updatedAt: comment.updatedAt,
+          url: null,
+        }));
+
+      return {
+        comments,
+        truncated: page.hasNextPage || page.comments.length > limit,
+      };
+    });
   }
 
   async create(input: IssueCreateInput): Promise<IssueSnapshot> {
-    const project = this.target.project;
-    const projectId =
-      typeof project === "string"
-        ? undefined
-        : "include" in project
-          ? project.create_in
-          : project.id;
-    const variables = {
-      input: {
-        ...(await this.#input(input)),
-        teamId: this.target.team.id,
-        ...(projectId ? { projectId } : {}),
-      },
-    };
-    const data = await this.#graphql<{ issueCreate: { success: boolean; issue: LinearIssue } }>(
-      `mutation Create($input: IssueCreateInput!) {
-        issueCreate(input: $input) {
-          success
-          issue {
-            id identifier title description url updatedAt createdAt dueDate priority priorityLabel
-            state { id name } labels { nodes { name } }
-            assignee { id name email active }
-            creator { id name email }
-          }
-        }
-      }`,
-      variables,
-    );
-    if (!data.issueCreate.success) {
-      throw new ProjectContextError("LINEAR_MUTATION_FAILED", "Linear issue creation failed");
-    }
-    return this.#snapshot(data.issueCreate.issue);
+    return this.connector.withSession(async (session) => {
+      const fields = await this.#input(session, input);
+      const created = parseLinearMcpOutput(
+        linearMcpSavedIssueSchema,
+        await session.call("save_issue", {
+          ...fields,
+          team: this.target.team.id,
+          ...(this.#creationProject() ? { project: this.#creationProject() } : {}),
+        }),
+      );
+
+      return this.#snapshot(await this.#get(session, created.id));
+    });
   }
 
   async update(identifier: string, input: IssueUpdateInput): Promise<IssueSnapshot> {
-    return this.#updateRaw(identifier, await this.#input(input));
-  }
+    return this.connector.withSession(async (session) => {
+      await this.#get(session, identifier);
+      const fields = await this.#input(session, input);
+      await session.call("save_issue", { id: identifier, ...fields });
 
-  async #updateRaw(identifier: string, input: Record<string, unknown>): Promise<IssueSnapshot> {
-    const data = await this.#graphql<{ issueUpdate: { success: boolean; issue: LinearIssue } }>(
-      `mutation Update($id: String!, $input: IssueUpdateInput!) {
-        issueUpdate(id: $id, input: $input) {
-          success
-          issue {
-            id identifier title description url updatedAt createdAt dueDate priority priorityLabel
-            state { id name } labels { nodes { name } }
-            assignee { id name email active }
-            creator { id name email }
-          }
-        }
-      }`,
-      { id: identifier, input },
-    );
-    if (!data.issueUpdate.success) {
-      throw new ProjectContextError("LINEAR_MUTATION_FAILED", "Linear issue update failed");
-    }
-    return this.#snapshot(data.issueUpdate.issue);
+      return this.#snapshot(await this.#get(session, identifier));
+    });
   }
 
   async comment(identifier: string, body: string): Promise<void> {
-    const issue = await this.get(identifier);
-    const data = await this.#graphql<{ commentCreate: { success: boolean } }>(
-      `mutation Comment($input: CommentCreateInput!) {
-        commentCreate(input: $input) { success }
-      }`,
-      { input: { issueId: issue.id, body } },
-    );
-    if (!data.commentCreate.success) {
-      throw new ProjectContextError("LINEAR_MUTATION_FAILED", "Linear comment creation failed");
-    }
+    await this.connector.withSession(async (session) => {
+      await this.#get(session, identifier);
+      await session.call("save_comment", { issueId: identifier, body });
+    });
   }
 
   async transition(identifier: string, nativeStatus: string): Promise<IssueSnapshot> {
-    const states = await this.#graphql<{
-      workflowStates: { nodes: Array<{ id: string; name: string }> };
-    }>(
-      `query States($teamId: ID!) {
-        workflowStates(filter: { team: { id: { eq: $teamId } } }) { nodes { id name } }
-      }`,
-      { teamId: this.target.team.id },
-    );
-    const matches = states.workflowStates.nodes.filter(
-      (state) => state.name.localeCompare(nativeStatus, undefined, { sensitivity: "accent" }) === 0,
-    );
-    if (matches.length !== 1) {
-      throw new ProjectContextError(
-        "LINEAR_STATE_AMBIGUOUS",
-        `Linear state ${nativeStatus} resolved to ${matches.length} workflow states`,
+    return this.connector.withSession(async (session) => {
+      await this.#get(session, identifier);
+      const statuses = parseLinearMcpOutput(
+        linearMcpStatusesSchema,
+        await session.call("list_issue_statuses", { team: this.target.team.id }),
       );
-    }
-    return this.#updateRaw(identifier, { stateId: matches[0]?.id });
+      const matches = statuses.filter((status) => sameName(status.name, nativeStatus));
+      if (matches.length !== 1) {
+        throw new ProjectContextError(
+          "LINEAR_STATE_AMBIGUOUS",
+          `Linear state ${nativeStatus} resolved to ${matches.length} workflow states`,
+        );
+      }
+
+      await session.call("save_issue", { id: identifier, state: matches[0]?.id });
+
+      return this.#snapshot(await this.#get(session, identifier));
+    });
   }
 
   async link(identifier: string, targetUrl: string): Promise<void> {

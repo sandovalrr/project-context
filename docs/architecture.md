@@ -5,9 +5,9 @@
 `project-context` provides repository-aware issue handling without placing
 agent configuration or credentials inside application repositories. Version
 0.1 supports Linear, GitHub Issues, and Jira Cloud through a local stdio MCP
-server and a diagnostic CLI. Hosted HTTP MCP, OAuth, pull requests, releases,
-Git authentication, commit signing, and repository administration are out of
-scope.
+server and a diagnostic CLI. Hosting project-context as an HTTP MCP server,
+pull requests, releases, Git authentication, commit signing, and repository
+administration are out of scope.
 
 ## Components
 
@@ -25,6 +25,8 @@ Node 22+ bundled executables
   | metadata-only audit writer
         |
         +------ Linear adapter
+        |          +------ allowlisted hosted Linear MCP tools
+        |          +------ workspace identity query
         +------ GitHub Issues adapter
         |          +------ optional Projects v2 boundary
         +------ Jira Cloud adapter
@@ -66,6 +68,14 @@ valid credential for the wrong Linear workspace, GitHub login, or Jira
 site/account is rejected. Provider origins are fixed to Linear, GitHub's public
 API, or the configured `*.atlassian.net` tenant.
 
+The Linear adapter is an MCP client as well as an issue adapter. It connects to
+Linear's hosted Streamable HTTP MCP endpoint with the resolved bearer
+credential, verifies the upstream tool interface, and exposes only the issue
+operations already present at project-context's provider-neutral seam. It does
+not proxy Linear's tool catalog. A minimal direct Linear API query remains for
+the expected workspace ID because the hosted MCP does not expose workspace
+identity. See [Linear MCP integration](linear-mcp.md).
+
 ## Mutation protocol
 
 All writes have two phases:
@@ -88,9 +98,11 @@ See the threat model for this trust boundary.
 ## Network behavior
 
 All provider traffic uses HTTPS, rejects redirects, has a 20-second timeout,
-and caps response bodies at 2 MiB. Only read operations retry temporary
-429/502/503/504 responses. Writes are never automatically retried unless a
-future adapter introduces an explicit provider idempotency guarantee.
+and caps response bodies at 2 MiB. Direct read operations may retry temporary
+429/502/503/504 responses. Linear MCP transport requests are never retried
+because read and write tool calls share the same HTTP method. Writes are never
+automatically retried unless a future adapter introduces an explicit provider
+idempotency guarantee.
 
 ## Local state and observability
 

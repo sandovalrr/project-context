@@ -2,9 +2,12 @@
 
 ## Linear
 
-- Authentication: personal API key.
+- Authentication: personal API key or OAuth access token passed as a bearer
+  credential to Linear's hosted MCP server.
 - Expected identity: workspace ID and display name.
 - Required target: team.
+- Provider operations use a fixed allowlist of hosted Linear MCP issue tools;
+  the wider upstream tool catalog is never proxied to agents.
 - Project policy: one explicit project, an explicit multi-project selection,
   `none` for unprojected issues, or `any` for all projected and unprojected
   issues in the configured team.
@@ -15,6 +18,9 @@
   unprojected.
 - A multi-project selection restricts reads and mutations to its `include`
   list and creates issues in its required `create_in` project.
+- Multi-project lists fan out by stable project ID, merge and deduplicate by
+  issue identifier, and use bounded pagination. `none` lists the configured
+  team and removes projected issues before returning content.
 - User discovery returns active members of the configured team and uses the
   Linear user ID as `assignee`.
 - Capabilities return team labels and Linear's canonical numeric priorities.
@@ -22,6 +28,8 @@
   catalog. Generic issue types remain unsupported.
 - Canonical states require explicit project mappings.
 - Issue URLs are added through comments when a native relation is unavailable.
+- Direct issue reads are revalidated before comments or mutations. Upstream
+  response drift and missing required MCP tools fail closed.
 
 ## GitHub Issues
 

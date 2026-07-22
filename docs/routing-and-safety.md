@@ -30,11 +30,12 @@ also requires current membership in that exact Project; a repository issue
 outside it returns `ISSUE_OUTSIDE_TARGET`.
 
 Comment reads use the same deterministic routing and return only comments from
-the configured issue target. Linear validates team and project in the comment
-query. Jira validates the project before and after its separate comment page
-request. GitHub uses a repository-scoped endpoint, rejects pull requests, and
-checks Project membership when a Project target is configured, even though
-GitHub exposes pull-request comments through its Issues API.
+the configured issue target. Linear retrieves and validates the issue through
+the hosted MCP before and after requesting its comments. Jira validates the
+project before and after its separate comment page request. GitHub uses a
+repository-scoped endpoint, rejects pull requests, and checks Project
+membership when a Project target is configured, even though GitHub exposes
+pull-request comments through its Issues API.
 Providers use bounded pagination and normalize results newest first; a
 `truncated` result means older comments were not returned.
 
