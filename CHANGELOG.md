@@ -1,3 +1,10 @@
+# [0.3.0](https://github.com/sandovalrr/project-context/compare/v0.2.0...v0.3.0) (2026-07-22)
+
+
+### Features
+
+* **github:** support Projects v2 issue targets ([#27](https://github.com/sandovalrr/project-context/issues/27)) ([c4a1cbe](https://github.com/sandovalrr/project-context/commit/c4a1cbea69219ce0594a5d39be801d89b9091860))
+
 # [0.2.0](https://github.com/sandovalrr/project-context/compare/v0.1.2...v0.2.0) (2026-07-19)
 
 
