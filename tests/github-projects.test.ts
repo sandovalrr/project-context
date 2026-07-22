@@ -245,6 +245,73 @@ describe("GitHub Projects v2 issue target", () => {
     ).toBe(true);
   });
 
+  test("revalidates referenced parents against the configured Project", async () => {
+    const parentIssue = {
+      ...restIssue,
+      id: 21,
+      node_id: "I_issue_13",
+      number: 13,
+      title: "Outside parent",
+      html_url: "https://github.com/acme/payments/issues/13",
+    };
+    const { fetcher, requests } = mockFetch([
+      restIssue,
+      membership(),
+      parentIssue,
+      {
+        data: {
+          node: {
+            projectItems: {
+              nodes: [],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          },
+        },
+      },
+    ]);
+    const adapter = new GitHubIssuesAdapter(profile, target, { token: "secret" }, fetcher, {
+      owner: "acme",
+      name: "payments",
+    });
+
+    await expect(adapter.update("#12", { parent: "#13" })).rejects.toMatchObject({
+      code: "ISSUE_OUTSIDE_TARGET",
+    });
+    expect(
+      requests.every(
+        (request) => request.init?.method === "GET" || request.url.endsWith("/graphql"),
+      ),
+    ).toBe(true);
+  });
+
+  test("preserves Project status when listing direct subissues", async () => {
+    const subIssue = {
+      ...restIssue,
+      id: 21,
+      node_id: "I_issue_13",
+      number: 13,
+      title: "Scoped subissue",
+      html_url: "https://github.com/acme/payments/issues/13",
+      repository_url: "https://api.github.com/repos/acme/payments",
+    };
+    const { fetcher } = mockFetch([
+      restIssue,
+      membership(),
+      [subIssue],
+      subIssue,
+      membership("Quality Assurance", "option-qa"),
+    ]);
+    const adapter = new GitHubIssuesAdapter(profile, target, { token: "secret" }, fetcher, {
+      owner: "acme",
+      name: "payments",
+    });
+
+    expect(await adapter.list({ parent: "#12" })).toMatchObject({
+      issues: [{ identifier: "#13", status: "Quality Assurance" }],
+      truncated: false,
+    });
+  });
+
   test("transitions Project status and synchronizes the GitHub issue lifecycle", async () => {
     const closedIssue = {
       ...restIssue,

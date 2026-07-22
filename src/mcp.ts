@@ -67,6 +67,8 @@ const issueSchema = z.object({
   archivedAt: z.string().nullable(),
   relations: z
     .object({
+      parent: issueReferenceSchema.nullable(),
+      subIssues: z.array(issueReferenceSchema),
       blocks: z.array(issueReferenceSchema),
       blockedBy: z.array(issueReferenceSchema),
       relatedTo: z.array(issueReferenceSchema),
@@ -533,7 +535,9 @@ export function createProjectIssuesServer(): McpServer {
         include_relations: z
           .boolean()
           .optional()
-          .describe("Include target-validated blocking, related, and duplicate relations"),
+          .describe(
+            "Include target-validated parent, subissue, blocking, related, and duplicate relations",
+          ),
         cwd: cwdSchema,
         provider: providerSchema,
       },

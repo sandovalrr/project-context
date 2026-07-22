@@ -29,7 +29,7 @@ Never infer a provider from issue wording. Never retry a failed provider operati
 
 ## Read Issues
 
-- Use `list_issues` for canonical status filters and direct subissue listing, `search_issues` only for title/description text, and `get_issue` for a single issue. Request relation expansion only when blocking, related, or duplicate information is needed.
+- Use `list_issues` for canonical status filters and direct subissue listing, `search_issues` only for title/description text, and `get_issue` for a single issue. Request relation expansion only when parent, subissue, blocking, related, or duplicate information is needed.
 - Use `list_issue_comments` when the user needs the discussion on one issue. Results are newest first and target-scoped; `truncated: true` means older comments were omitted. This tool does not return field history or a full activity timeline.
 - Use `get_issue_capabilities` before creating an issue or whenever valid labels, priorities, issue types, canonical statuses, defaults, or presets are unknown. Pass returned option values unchanged.
 - Use `search_issue_options` when a label, priority, issue type, cycle, or milestone capability points to it, when its inline catalog is truncated, or when a large catalog needs narrowing. Pass the returned value unchanged.
@@ -62,7 +62,7 @@ Never call `apply_issue_change` without a preview from the same conversation. To
 
 Creation presets are opt-in. An agent may recommend one but must not select it silently. Bulk changes require a separate preview and approval for each batch; do not turn many individual approvals into implied bulk approval.
 
-Supported writes are create, update, comment, transition, close, reopen, and link. Linear create/update fields may include target-scoped parents, planning fields, and issue relationships when capabilities allow them. Comment writes may reply to or edit a comment only after its ownership is validated. SLA fields and permanent issue deletion are unsupported.
+Supported writes are create, update, comment, transition, close, reopen, and link. Linear create/update fields may include target-scoped parents, planning fields, and issue relationships when capabilities allow them. GitHub fields may include repository issue types, milestones, parents, blocking relationships, and duplicates when capabilities allow them. Comment writes may reply to or edit a comment only after its ownership is validated; GitHub supports edits but not threaded replies. SLA fields and permanent issue deletion are unsupported.
 
 ## Protect Credentials and Scope
 

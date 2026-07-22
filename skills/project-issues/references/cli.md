@@ -13,7 +13,7 @@ project-context issue user search <query> [--provider <alias> | --all]
 project-context issue get <reference> [--include-relations] [--provider <alias>]
 project-context issue comment list <reference> [--provider <alias>] [--limit <1-100>]
 project-context issue prepare create --title <title> [--description <text>] [--parent <reference>] [--preset <name>]
-project-context issue prepare update --ref <reference> --title <title>
+project-context issue prepare update --ref <reference> --title <title> [--clear-issue-type] [--clear-milestone]
 project-context issue prepare comment --ref <reference> --body <text> [--comment-id <id> | --parent-comment-id <id>]
 project-context issue prepare transition --ref <reference> --status <canonical-status>
 project-context issue prepare close|reopen --ref <reference>

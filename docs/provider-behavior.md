@@ -60,10 +60,27 @@
 - Pull requests returned through issue-shaped APIs are always excluded.
 - User discovery uses the repository's available issue assignees and returns
   the GitHub login as `assignee`.
-- Capabilities return repository labels and explicitly mark priority and generic
-  issue type as unsupported.
-- Option search scans only repository labels, stops after ten 100-label pages,
-  and reports truncation when the bound prevents a complete answer.
+- Capabilities return repository labels, milestones, and repository-enabled
+  issue types. Repositories without issue types report that field as
+  unsupported. Priority remains unsupported.
+- Option search scans repository labels, issue types, or milestones and reports
+  truncation when a bounded catalog is incomplete.
+- Create and update accept issue types and milestones returned by capability or
+  option discovery. Updates can clear either field with `null`.
+- Native parent/subissue, blocking/blocked-by, and duplicate relationships are
+  supported. Direct subissue listing validates the parent, and relation-expanded
+  reads return parent, direct subissues, dependencies, and the canonical
+  duplicate only after every reference passes repository and optional Project
+  target validation.
+- Relationship writes re-resolve every referenced issue during apply. Parent
+  replacement and removal use GitHub's subissue endpoints; dependency removal
+  uses `removeBlocks` or `removeBlockedBy`; duplicate removal uses GitHub's
+  native unmark operation.
+- Existing comments can be edited only after their `issue_url` proves ownership
+  by the target issue. GitHub comments are flat, so threaded replies remain
+  unsupported.
+- Generic `relatedTo`, custom priority/due-date/estimate/cycle mappings, and
+  archived issue semantics remain unsupported.
 - Without a Project target, native states are `open` and `closed` and
   `in_progress` requires configured labels. With a Project target, native states
   are Status option names and `Canceled` represents GitHub's `not_planned`
@@ -94,11 +111,13 @@ transition, close/reopen, and related-link operations where the provider
 supports them. Permanent deletion is never exposed. Unsupported native features
 produce a capability error rather than an approximation.
 
-Linear uses the generic create/update field map for `parent`, `dueDate`,
-`estimate`, `cycle`, `milestone`, `blocks`, `blockedBy`, `relatedTo`,
-`duplicateOf`, and explicit relationship removals. The generic comment
-operation accepts either `comment_id` for an edit or `parent_comment_id` for a
-reply. These modes are mutually exclusive and unsupported providers reject them.
+Providers use the generic create/update field map only for capabilities they
+advertise. Linear supports `parent`, planning fields, all three relationship
+directions, duplicates, and explicit removals. GitHub supports `issueType`,
+`milestone`, `parent`, blocking relationships, duplicates, and explicit blocker
+removals. The generic comment operation accepts either `comment_id` for an edit
+or `parent_comment_id` for a reply. These modes are mutually exclusive;
+GitHub supports edits but not replies.
 
 `search_issues` accepts title/description text. It is not a status or structured
 filter. `list_issues` accepts optional canonical status filters, returns both
@@ -116,7 +135,9 @@ for selection rather than guessing a user.
 
 Issue snapshots include normalized assignee and creator identities, priority,
 issue type, creation time, due date, estimate, cycle, milestone, archive time,
-and opt-in relations. Unsupported, absent, or unrequested values are `null`.
+and opt-in relations. Expanded relations include the parent, direct subissues,
+blocking directions, related issues, and canonical duplicate. Unsupported,
+absent, or unrequested values are `null` or an empty relation array.
 The assignee object includes the exact provider-native `assignee` value accepted
 by issue creation and updates.
 
