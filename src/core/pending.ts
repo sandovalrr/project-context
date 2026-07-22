@@ -7,7 +7,13 @@ import { getPaths } from "./paths.ts";
 export type IssueOperationRequest =
   | { operation: "create"; input: Record<string, unknown>; preset?: string }
   | { operation: "update"; identifier: string; input: Record<string, unknown> }
-  | { operation: "comment"; identifier: string; body: string }
+  | {
+      operation: "comment";
+      identifier: string;
+      body: string;
+      commentId?: string;
+      parentCommentId?: string;
+    }
   | { operation: "transition"; identifier: string; status: string }
   | { operation: "close"; identifier: string }
   | { operation: "reopen"; identifier: string }

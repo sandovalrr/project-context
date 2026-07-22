@@ -46,10 +46,10 @@ credential resolvers must not execute repository-controlled scripts.
 
 ### Provider networks
 
-Linear, GitHub, Jira Cloud, DNS, TLS, and the local network are external trust
-boundaries. Requests use HTTPS and fixed allowed origins, reject redirects,
-time out, and cap response bodies. Provider responses remain untrusted data and
-are normalized before returning to the client.
+Linear's hosted MCP and API, GitHub, Jira Cloud, DNS, TLS, and the local network
+are external trust boundaries. Requests use HTTPS and fixed allowed origins,
+reject redirects, time out, and cap response bodies. Provider responses remain
+untrusted data and are normalized before returning to the client.
 
 ### Package and release infrastructure
 
@@ -77,6 +77,15 @@ adapter applies that allowlist to list/search queries and validates it again on
 direct reads. Its required `create_in` ID must be in the allowlist, preventing
 creation from silently depending on list order or escaping the read boundary.
 
+The hosted Linear MCP advertises a much wider tool catalog than project-context
+needs. The adapter statically allowlists issue read/write, comment, user, label,
+status, cycle, and milestone tools, validates their input interfaces at
+connection time, rejects non-allowlisted input properties before transport,
+and normalizes their output through local schemas. Missing tools, input schema
+drift, malformed output, and out-of-target results fail closed. SLA fields,
+attachments, deletes, projects, initiatives, releases, diffs, reviews,
+delegation, and administrative tools are not reachable through project-context.
+
 GitHub Project targets use stable GraphQL node IDs for both the Project and its
 Status field. Direct reads and mutations verify Project membership; Project
 lists filter content type and repository. Names are never used as the security
@@ -100,10 +109,10 @@ tools. File or keychain resolvers are preferable for long-lived credentials.
 
 ### SSRF, redirects, and response exhaustion
 
-Adapters allow only their fixed HTTPS origin: Linear, `api.github.com`, or the
-configured `*.atlassian.net` tenant. Redirects are rejected. Requests have a
-20-second timeout and responses are capped at 2 MiB. Safe request IDs may be
-reported; response bodies are not copied into errors.
+Adapters allow only their fixed HTTPS origin: Linear's hosted MCP and API,
+`api.github.com`, or the configured `*.atlassian.net` tenant. Redirects are
+rejected. Requests have a 20-second timeout and responses are capped at 2 MiB.
+Safe request IDs may be reported; response bodies are not copied into errors.
 
 ### Tampered or replayed preview
 

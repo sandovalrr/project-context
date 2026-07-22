@@ -408,36 +408,143 @@ describe("issue comment reading", () => {
   });
 });
 
-const linearIdentity = {
-  data: {
-    viewer: { id: "user-1", name: "R", email: "r@example.com" },
-    organization: { id: "workspace-1", name: "Workspace" },
-  },
-};
-
 function linearIssue(projectId?: string) {
   return {
-    data: {
-      issue: {
-        id: "issue-1",
-        identifier: "ENG-1",
-        title: "Example issue",
-        description: "Description",
-        url: "https://linear.app/workspace/issue/ENG-1",
-        updatedAt: "2026-07-18T10:00:00Z",
-        state: { id: "state-1", name: "Backlog" },
-        labels: { nodes: [] },
-        team: { id: "team-1" },
-        project: projectId ? { id: projectId } : null,
-      },
-    },
+    id: "ENG-1",
+    title: "Example issue",
+    description: "Description",
+    priority: { value: 0, name: "No priority" },
+    url: "https://linear.app/workspace/issue/ENG-1",
+    createdAt: "2026-07-17T10:00:00Z",
+    updatedAt: "2026-07-18T10:00:00Z",
+    dueDate: null,
+    status: "Backlog",
+    labels: [],
+    createdBy: "Richard",
+    createdById: "user-1",
+    teamId: "team-1",
+    ...(projectId ? { project: "Project", projectId } : {}),
   };
+}
+
+const linearMcpTools = {
+  get_issue: ["id", "includeRelations"],
+  get_user: ["query"],
+  list_comments: ["issueId", "limit", "cursor", "orderBy"],
+  list_cycles: ["teamId", "type"],
+  list_issue_labels: ["team", "name", "limit", "cursor"],
+  list_issue_statuses: ["team"],
+  list_issues: [
+    "team",
+    "project",
+    "query",
+    "limit",
+    "cursor",
+    "orderBy",
+    "includeArchived",
+    "parentId",
+  ],
+  list_milestones: ["project"],
+  list_users: ["team", "query", "limit", "cursor"],
+  save_comment: ["id", "issueId", "parentId", "body"],
+  save_issue: [
+    "id",
+    "title",
+    "description",
+    "team",
+    "project",
+    "state",
+    "assignee",
+    "priority",
+    "labels",
+    "cycle",
+    "milestone",
+    "dueDate",
+    "parentId",
+    "estimate",
+    "blocks",
+    "blockedBy",
+    "relatedTo",
+    "duplicateOf",
+    "removeBlocks",
+    "removeBlockedBy",
+    "removeRelatedTo",
+  ],
+} as const;
+
+function jsonRpcResponse(id: unknown, result: unknown): Response {
+  return new Response(JSON.stringify({ jsonrpc: "2.0", id, result }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function linearMcpFetch(
+  issue: ReturnType<typeof linearIssue>,
+  comments: unknown = { comments: [], hasNextPage: false },
+): typeof fetch {
+  const fetcher = mock(async (url: string | URL | Request, init?: RequestInit) => {
+    if (String(url) === "https://api.linear.app/graphql") {
+      return new Response(
+        JSON.stringify({ data: { organization: { id: "workspace-1", name: "Workspace" } } }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+
+    const request = init?.body ? JSON.parse(String(init.body)) : undefined;
+    if (init?.method === "DELETE") return new Response(null, { status: 204 });
+    if (request?.method === "notifications/initialized") {
+      return new Response(null, { status: 202 });
+    }
+    if (request?.method === "initialize") {
+      return jsonRpcResponse(request.id, {
+        protocolVersion: request.params.protocolVersion,
+        capabilities: { tools: {} },
+        serverInfo: { name: "Linear MCP", version: "1.0.0" },
+      });
+    }
+    if (request?.method === "tools/list") {
+      return jsonRpcResponse(request.id, {
+        tools: Object.entries(linearMcpTools).map(([name, properties]) => ({
+          name,
+          inputSchema: {
+            type: "object",
+            properties: Object.fromEntries(properties.map((property) => [property, {}])),
+          },
+        })),
+      });
+    }
+    if (request?.method === "tools/call") {
+      const value =
+        request.params.name === "get_user"
+          ? {
+              id: "user-1",
+              name: "Richard",
+              displayName: "Richard",
+              email: "r@example.com",
+              isActive: true,
+            }
+          : request.params.name === "get_issue"
+            ? issue
+            : request.params.name === "list_comments"
+              ? comments
+              : {};
+
+      return jsonRpcResponse(request.id, {
+        content: [{ type: "text", text: JSON.stringify(value) }],
+      });
+    }
+
+    throw new Error(`unexpected Linear MCP request ${JSON.stringify(request)}`);
+  });
+
+  return fetcher as unknown as typeof fetch;
 }
 
 describe("issue write workflow", () => {
   test("refuses to prepare a Linear mutation outside the configured target", async () => {
     await withLinearFixture(async (repository) => {
-      const fetcher = mockFetch([linearIdentity, linearIssue("project-1")]);
+      const fetcher = linearMcpFetch(linearIssue("project-1"));
 
       await expect(
         prepareIssueOperation(
@@ -450,21 +557,63 @@ describe("issue write workflow", () => {
 
   test("refuses to apply a Linear mutation after the issue leaves the target", async () => {
     await withLinearFixture(async (repository) => {
-      const fetcher = mockFetch([
-        linearIdentity,
-        linearIssue(),
-        linearIdentity,
-        linearIssue("project-1"),
-      ]);
+      const prepareFetcher = linearMcpFetch(linearIssue());
       const preview = await prepareIssueOperation(
         { operation: "comment", identifier: "linear:ENG-1", body: "comment" },
-        { cwd: repository, fetcher },
+        { cwd: repository, fetcher: prepareFetcher },
+      );
+
+      const applyFetcher = linearMcpFetch(linearIssue("project-1"));
+
+      await expect(
+        applyIssueOperation(preview.token, { cwd: repository, fetcher: applyFetcher }),
+      ).rejects.toMatchObject({ code: "ISSUE_OUTSIDE_TARGET" });
+    });
+  });
+
+  test("validates subissue parents during prepare and again during apply", async () => {
+    await withLinearFixture(async (repository) => {
+      const preview = await prepareIssueOperation(
+        { operation: "create", input: { title: "Child", parent: "ENG-1" } },
+        { cwd: repository, fetcher: linearMcpFetch(linearIssue()) },
       );
 
       await expect(
-        applyIssueOperation(preview.token, { cwd: repository, fetcher }),
+        applyIssueOperation(preview.token, {
+          cwd: repository,
+          fetcher: linearMcpFetch(linearIssue("project-1")),
+        }),
       ).rejects.toMatchObject({ code: "ISSUE_OUTSIDE_TARGET" });
-      expect((fetcher as unknown as ReturnType<typeof mock>).mock.calls).toHaveLength(4);
+    });
+  });
+
+  test("rejects comment edits when the comment is not owned by the target issue", async () => {
+    await withLinearFixture(async (repository) => {
+      await expect(
+        prepareIssueOperation(
+          {
+            operation: "comment",
+            identifier: "linear:ENG-1",
+            body: "Edited",
+            commentId: "comment-from-another-issue",
+          },
+          { cwd: repository, fetcher: linearMcpFetch(linearIssue()) },
+        ),
+      ).rejects.toMatchObject({ code: "ISSUE_COMMENT_OUTSIDE_TARGET" });
+    });
+  });
+
+  test("keeps SLA fields outside the provider-neutral Linear write surface", async () => {
+    await withLinearFixture(async (repository) => {
+      await expect(
+        prepareIssueOperation(
+          {
+            operation: "create",
+            input: { title: "Example", slaBreachesAt: "2026-08-01T00:00:00Z" },
+          },
+          { cwd: repository, fetcher: linearMcpFetch(linearIssue()) },
+        ),
+      ).rejects.toMatchObject({ code: "FIELD_UNSUPPORTED" });
     });
   });
 

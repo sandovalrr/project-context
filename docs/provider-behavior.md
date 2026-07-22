@@ -2,9 +2,12 @@
 
 ## Linear
 
-- Authentication: personal API key.
+- Authentication: personal API key or OAuth access token passed as a bearer
+  credential to Linear's hosted MCP server.
 - Expected identity: workspace ID and display name.
 - Required target: team.
+- Provider operations use a fixed allowlist of hosted Linear MCP issue tools;
+  the wider upstream tool catalog is never proxied to agents.
 - Project policy: one explicit project, an explicit multi-project selection,
   `none` for unprojected issues, or `any` for all projected and unprojected
   issues in the configured team.
@@ -15,13 +18,30 @@
   unprojected.
 - A multi-project selection restricts reads and mutations to its `include`
   list and creates issues in its required `create_in` project.
+- Multi-project lists fan out by stable project ID, merge and deduplicate by
+  issue identifier, and use bounded pagination. `none` lists the configured
+  team and removes projected issues before returning content.
 - User discovery returns active members of the configured team and uses the
   Linear user ID as `assignee`.
-- Capabilities return team labels and Linear's canonical numeric priorities.
-- Option search uses team-filtered label queries and the fixed Linear priority
-  catalog. Generic issue types remain unsupported.
+- Capabilities return team labels, Linear's canonical numeric priorities,
+  team cycles, and project milestones where the target has an exact creation
+  project. Option search narrows those target-scoped catalogs. Generic issue
+  types remain unsupported.
+- Create and update support due dates, estimates, cycles, milestones,
+  target-scoped parents, and blocking/related/duplicate relationships. Removing
+  a parent, cycle, due date, estimate, or duplicate uses `null`; relationship
+  removals use `removeBlocks`, `removeBlockedBy`, and `removeRelatedTo`.
+- Direct subissue listing validates `parent` before applying the upstream
+  parent filter. Archived issues require an explicit `includeArchived` opt-in.
+- Relation-expanded reads validate every related issue before returning any
+  relation content. Comment replies and edits validate that the referenced
+  comment belongs to the target issue and fail closed at the pagination bound.
+- SLA fields are not part of the provider-neutral field set or hosted MCP input
+  allowlist.
 - Canonical states require explicit project mappings.
 - Issue URLs are added through comments when a native relation is unavailable.
+- Direct issue reads are revalidated before comments or mutations. Upstream
+  response drift and missing required MCP tools fail closed.
 
 ## GitHub Issues
 
@@ -74,6 +94,12 @@ transition, close/reopen, and related-link operations where the provider
 supports them. Permanent deletion is never exposed. Unsupported native features
 produce a capability error rather than an approximation.
 
+Linear uses the generic create/update field map for `parent`, `dueDate`,
+`estimate`, `cycle`, `milestone`, `blocks`, `blockedBy`, `relatedTo`,
+`duplicateOf`, and explicit relationship removals. The generic comment
+operation accepts either `comment_id` for an edit or `parent_comment_id` for a
+reply. These modes are mutually exclusive and unsupported providers reject them.
+
 `search_issues` accepts title/description text. It is not a status or structured
 filter. `list_issues` accepts optional canonical status filters, returns both
 the provider-native `status` and normalized `canonicalStatus`, and orders each
@@ -89,9 +115,10 @@ matches those available identity fields. Callers must present multiple matches
 for selection rather than guessing a user.
 
 Issue snapshots include normalized assignee and creator identities, priority,
-issue type, creation time, and due date. Unsupported or absent values are
-`null`. The assignee object includes the exact provider-native `assignee` value
-accepted by issue creation and updates.
+issue type, creation time, due date, estimate, cycle, milestone, archive time,
+and opt-in relations. Unsupported, absent, or unrequested values are `null`.
+The assignee object includes the exact provider-native `assignee` value accepted
+by issue creation and updates.
 
 `get_issue_capabilities` returns supported fields and exact reusable options
 for the configured target. It also overlays host-configured canonical statuses,
@@ -101,9 +128,10 @@ an empty option list: `operations`, `acceptsCustomValues`, `defaultValue`, and
 `discoveryTool` are authoritative. Inline option catalogs are bounded to 100;
 `optionsTruncated: true` means callers must not treat the catalog as complete.
 
-`search_issue_options` narrows reusable `labels`, `priority`, or `issueType`
-values inside the configured provider target. Returned values are opaque and
-must be passed unchanged. Results are bounded to 100 and include `truncated`;
+`search_issue_options` narrows reusable `labels`, `priority`, `issueType`,
+`cycle`, or `milestone` values inside the configured provider target. Returned
+values are opaque and must be passed unchanged. Results are bounded to 100 and
+include `truncated`;
 an incomplete result is never evidence that an option is invalid. Providers
 return `ISSUE_OPTION_FIELD_UNSUPPORTED` when a field has no safe searchable
 catalog. Capability `discoveryTool: search_issue_options` identifies fields

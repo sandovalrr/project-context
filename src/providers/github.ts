@@ -293,6 +293,11 @@ export class GitHubIssuesAdapter implements IssueProviderAdapter {
       issueType: null,
       createdAt: issue.created_at ?? null,
       dueDate: null,
+      estimate: null,
+      cycle: null,
+      milestone: null,
+      archivedAt: null,
+      relations: null,
       url: issue.html_url,
       updatedAt: issue.updated_at,
       version,
@@ -381,6 +386,12 @@ export class GitHubIssuesAdapter implements IssueProviderAdapter {
   }
 
   async list(options: IssueListOptions = {}): Promise<IssueListResult> {
+    if (options.parent || options.includeArchived) {
+      throw new ProjectContextError(
+        "OPERATION_UNSUPPORTED",
+        "GitHub issue listing does not support parent or archived filters",
+      );
+    }
     const limit = options.limit ?? 30;
     if (this.#project) {
       const result = await this.#project.collectIssueItems(
@@ -645,6 +656,26 @@ export class GitHubIssuesAdapter implements IssueProviderAdapter {
       throw new ProjectContextError(
         "FIELD_UNSUPPORTED",
         "GitHub Issues does not support the generic issueType field",
+      );
+    }
+    const unsupported = [
+      "dueDate",
+      "estimate",
+      "cycle",
+      "milestone",
+      "parent",
+      "blocks",
+      "blockedBy",
+      "relatedTo",
+      "duplicateOf",
+      "removeBlocks",
+      "removeBlockedBy",
+      "removeRelatedTo",
+    ].find((field) => Object.hasOwn(input, field));
+    if (unsupported) {
+      throw new ProjectContextError(
+        "FIELD_UNSUPPORTED",
+        `GitHub Issues does not support the generic ${unsupported} field`,
       );
     }
   }

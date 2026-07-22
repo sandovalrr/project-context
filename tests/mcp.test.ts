@@ -66,6 +66,8 @@ describe("provider-neutral MCP server", () => {
                 issueType: { anyOf: expect.any(Array) },
                 createdAt: { anyOf: expect.any(Array) },
                 dueDate: { anyOf: expect.any(Array) },
+                estimate: { anyOf: expect.any(Array) },
+                relations: { anyOf: expect.any(Array) },
               },
             },
           },
@@ -88,9 +90,15 @@ describe("provider-neutral MCP server", () => {
         },
         all: { type: "boolean" },
         limit: { type: "integer", minimum: 1, maximum: 100 },
+        include_archived: { type: "boolean" },
+        parent: { type: "string", minLength: 1 },
       },
     });
     expect(listTool?.annotations?.readOnlyHint).toBe(true);
+    const getTool = tools.tools.find((tool) => tool.name === "get_issue");
+    expect(getTool?.inputSchema).toMatchObject({
+      properties: { include_relations: { type: "boolean" } },
+    });
     const listUsersTool = tools.tools.find((tool) => tool.name === "list_users");
     expect(listUsersTool?.description).toContain("assignable");
     expect(listUsersTool?.outputSchema).toMatchObject({
@@ -123,10 +131,10 @@ describe("provider-neutral MCP server", () => {
     });
     expect(capabilitiesTool?.annotations?.readOnlyHint).toBe(true);
     const searchOptionsTool = tools.tools.find((tool) => tool.name === "search_issue_options");
-    expect(searchOptionsTool?.description).toContain("labels, priorities, or issue types");
+    expect(searchOptionsTool?.description).toContain("labels, priorities, issue types");
     expect(searchOptionsTool?.inputSchema).toMatchObject({
       properties: {
-        field: { enum: ["labels", "priority", "issueType"] },
+        field: { enum: ["labels", "priority", "issueType", "cycle", "milestone"] },
         query: { type: "string", minLength: 1 },
         limit: { type: "integer", minimum: 1, maximum: 100 },
       },
@@ -160,6 +168,13 @@ describe("provider-neutral MCP server", () => {
       },
     });
     expect(commentsTool?.annotations?.readOnlyHint).toBe(true);
+    const prepareTool = tools.tools.find((tool) => tool.name === "prepare_issue_change");
+    expect(prepareTool?.inputSchema).toMatchObject({
+      properties: {
+        comment_id: { type: "string", minLength: 1 },
+        parent_comment_id: { type: "string", minLength: 1 },
+      },
+    });
     expect(
       tools.tools.find((tool) => tool.name === "apply_issue_change")?.annotations?.destructiveHint,
     ).toBe(true);

@@ -40,7 +40,7 @@ import { CANONICAL_STATUSES, type CanonicalStatus } from "./core/types.ts";
 import { startProjectIssuesStdioServer } from "./mcp.ts";
 import { PACKAGE_VERSION } from "./metadata.ts";
 
-const issueOptionFields = ["labels", "priority", "issueType"] as const;
+const issueOptionFields = ["labels", "priority", "issueType", "cycle", "milestone"] as const;
 
 interface OutputOptions {
   json?: boolean;
@@ -147,12 +147,38 @@ async function doctor(cwd: string) {
 
 function issueFields(argv: Record<string, unknown>): Record<string, unknown> {
   const fields: Record<string, unknown> = {};
-  for (const key of ["title", "description", "assignee", "priority"] as const) {
+  for (const key of [
+    "title",
+    "description",
+    "assignee",
+    "priority",
+    "dueDate",
+    "estimate",
+    "cycle",
+    "milestone",
+    "parent",
+    "duplicateOf",
+  ] as const) {
     if (argv[key] !== undefined) fields[key] = argv[key];
   }
   if (argv.label !== undefined) fields.labels = argv.label;
   if (argv.issueType !== undefined) fields.issueType = argv.issueType;
+  for (const key of [
+    "blocks",
+    "blockedBy",
+    "relatedTo",
+    "removeBlocks",
+    "removeBlockedBy",
+    "removeRelatedTo",
+  ] as const) {
+    if (argv[key] !== undefined) fields[key] = argv[key];
+  }
   if (argv.clearAssignee === true) fields.assignee = null;
+  if (argv.clearDueDate === true) fields.dueDate = null;
+  if (argv.clearEstimate === true) fields.estimate = null;
+  if (argv.clearCycle === true) fields.cycle = null;
+  if (argv.clearParent === true) fields.parent = null;
+  if (argv.clearDuplicateOf === true) fields.duplicateOf = null;
   return fields;
 }
 
@@ -187,7 +213,15 @@ function issuePrepareRequest(argv: Record<string, unknown>): IssueOperationReque
     if (typeof argv.body !== "string") {
       throw new ProjectContextError("ARGUMENT_REQUIRED", "comment requires --body");
     }
-    return { operation, identifier, body: argv.body };
+    return {
+      operation,
+      identifier,
+      body: argv.body,
+      ...(typeof argv.commentId === "string" ? { commentId: argv.commentId } : {}),
+      ...(typeof argv.parentCommentId === "string"
+        ? { parentCommentId: argv.parentCommentId }
+        : {}),
+    };
   }
   if (operation === "transition") {
     if (typeof argv.status !== "string") {
@@ -399,7 +433,7 @@ const cli = yargs(hideBin(process.argv))
         option
           .command(
             "search <field> <query>",
-            "Search target-scoped labels, priorities, or issue types",
+            "Search target-scoped labels, priorities, issue types, cycles, or milestones",
             (command) =>
               command
                 .positional("field", {
@@ -564,6 +598,15 @@ const cli = yargs(hideBin(process.argv))
               default: 30,
               description: "Maximum results per provider",
             })
+            .option("include-archived", {
+              type: "boolean",
+              default: false,
+              description: "Include archived issues when the provider supports it",
+            })
+            .option("parent", {
+              type: "string",
+              description: "List direct subissues of this target-scoped parent",
+            })
             .conflicts("all", "provider")
             .check((argv) => {
               if (!Number.isInteger(argv.limit) || argv.limit < 1 || argv.limit > 100) {
@@ -582,6 +625,8 @@ const cli = yargs(hideBin(process.argv))
               all: argv.all,
               ...(argv.status ? { statuses: argv.status as CanonicalStatus[] } : {}),
               limit: argv.limit,
+              includeArchived: argv.includeArchived,
+              ...(argv.parent ? { parent: argv.parent } : {}),
             }),
             argv,
           ),
@@ -623,12 +668,20 @@ const cli = yargs(hideBin(process.argv))
       .command(
         "get <reference>",
         "Read one issue using deterministic provider routing",
-        (command) => command.positional("reference", { type: "string", demandOption: true }),
+        (command) =>
+          command
+            .positional("reference", { type: "string", demandOption: true })
+            .option("include-relations", {
+              type: "boolean",
+              default: false,
+              description: "Include target-validated blocking, related, and duplicate relations",
+            }),
         async (argv) =>
           print(
             await getIssue(argv.reference, {
               cwd: argv.cwd ?? process.cwd(),
               ...(argv.provider ? { provider: argv.provider } : {}),
+              includeRelations: argv.includeRelations,
             }),
             argv,
           ),
@@ -673,15 +726,67 @@ const cli = yargs(hideBin(process.argv))
               description: "Provider-native or canonical priority",
             })
             .option("issue-type", { type: "string", description: "Jira issue type for creation" })
+            .option("due-date", { type: "string", description: "Due date in YYYY-MM-DD format" })
+            .option("estimate", { type: "number", description: "Non-negative issue estimate" })
+            .option("cycle", { type: "string", description: "Target-team cycle name or ID" })
+            .option("milestone", {
+              type: "string",
+              description: "Target-project milestone name or ID",
+            })
+            .option("parent", {
+              type: "string",
+              description: "Target-scoped parent issue identifier for a subissue",
+            })
+            .option("blocks", {
+              type: "array",
+              string: true,
+              description: "Target-scoped issue this issue blocks; repeat as needed",
+            })
+            .option("blocked-by", {
+              type: "array",
+              string: true,
+              description: "Target-scoped blocker issue; repeat as needed",
+            })
+            .option("related-to", {
+              type: "array",
+              string: true,
+              description: "Target-scoped related issue; repeat as needed",
+            })
+            .option("duplicate-of", {
+              type: "string",
+              description: "Target-scoped issue this issue duplicates",
+            })
+            .option("remove-blocks", { type: "array", string: true })
+            .option("remove-blocked-by", { type: "array", string: true })
+            .option("remove-related-to", { type: "array", string: true })
+            .option("clear-due-date", { type: "boolean", default: false })
+            .option("clear-estimate", { type: "boolean", default: false })
+            .option("clear-cycle", { type: "boolean", default: false })
+            .option("clear-parent", { type: "boolean", default: false })
+            .option("clear-duplicate-of", { type: "boolean", default: false })
             .option("preset", { type: "string", description: "Explicit named creation preset" })
             .option("body", { type: "string", description: "Comment body" })
+            .option("comment-id", {
+              type: "string",
+              description: "Existing target-issue comment to edit",
+            })
+            .option("parent-comment-id", {
+              type: "string",
+              description: "Existing target-issue comment to reply to",
+            })
             .option("status", {
               type: "string",
               choices: ["open", "in_progress", "done", "canceled"] as const,
               description: "Canonical destination status",
             })
             .option("url", { type: "string", description: "Related issue HTTPS URL" })
-            .conflicts("assignee", "clear-assignee"),
+            .conflicts("assignee", "clear-assignee")
+            .conflicts("due-date", "clear-due-date")
+            .conflicts("estimate", "clear-estimate")
+            .conflicts("cycle", "clear-cycle")
+            .conflicts("parent", "clear-parent")
+            .conflicts("duplicate-of", "clear-duplicate-of")
+            .conflicts("comment-id", "parent-comment-id"),
         async (argv) =>
           print(
             await prepareIssueOperation(issuePrepareRequest(argv), {

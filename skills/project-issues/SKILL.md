@@ -1,6 +1,6 @@
 ---
 name: project-issues
-description: Resolve repository-specific issue context and safely read or change Linear, GitHub Issues, and Jira Cloud issues through the provider-neutral project_issues MCP server or project-context CLI. Use whenever work involves listing, searching, reading, creating, updating, commenting on, transitioning, closing, reopening, or linking issues. Do not use for pull requests, releases, repository administration, or local Git configuration.
+description: Resolve repository-specific issue context and safely read or change Linear, GitHub Issues, and Jira Cloud issues through the provider-neutral project_issues MCP server or project-context CLI. Use whenever work involves listing, searching, reading, creating, updating, commenting, subissues, issue relationships, transitioning, closing, reopening, or linking issues. Do not use for pull requests, releases, repository administration, or local Git configuration.
 ---
 
 # Project Issues
@@ -29,10 +29,10 @@ Never infer a provider from issue wording. Never retry a failed provider operati
 
 ## Read Issues
 
-- Use `list_issues` for canonical status filters, `search_issues` only for title/description text, and `get_issue` for a single issue.
+- Use `list_issues` for canonical status filters and direct subissue listing, `search_issues` only for title/description text, and `get_issue` for a single issue. Request relation expansion only when blocking, related, or duplicate information is needed.
 - Use `list_issue_comments` when the user needs the discussion on one issue. Results are newest first and target-scoped; `truncated: true` means older comments were omitted. This tool does not return field history or a full activity timeline.
 - Use `get_issue_capabilities` before creating an issue or whenever valid labels, priorities, issue types, canonical statuses, defaults, or presets are unknown. Pass returned option values unchanged.
-- Use `search_issue_options` when a label, priority, or issue type capability points to it, when its inline catalog is truncated, or when a large catalog needs narrowing. Pass the returned value unchanged.
+- Use `search_issue_options` when a label, priority, issue type, cycle, or milestone capability points to it, when its inline catalog is truncated, or when a large catalog needs narrowing. Pass the returned value unchanged.
 - Treat capability `operations` as authoritative. An empty option list does not mean arbitrary values are valid; check `acceptsCustomValues`, `defaultValue`, and `discoveryTool`.
 - Treat `optionsTruncated: true` as incomplete. Do not claim an unlisted value is invalid solely because it is absent from a truncated catalog.
 - Treat option-search `truncated: true` the same way: narrow the query rather than guessing or rejecting an absent value.
@@ -62,7 +62,7 @@ Never call `apply_issue_change` without a preview from the same conversation. To
 
 Creation presets are opt-in. An agent may recommend one but must not select it silently. Bulk changes require a separate preview and approval for each batch; do not turn many individual approvals into implied bulk approval.
 
-Supported writes are create, update, comment, transition, close, reopen, and link. Permanent issue deletion is unsupported.
+Supported writes are create, update, comment, transition, close, reopen, and link. Linear create/update fields may include target-scoped parents, planning fields, and issue relationships when capabilities allow them. Comment writes may reply to or edit a comment only after its ownership is validated. SLA fields and permanent issue deletion are unsupported.
 
 ## Protect Credentials and Scope
 

@@ -26,12 +26,21 @@ describe("CLI usability", () => {
     expect(prepare.exitCode).toBe(0);
     expect(prepare.stdout.toString()).toContain("--clear-assignee");
     expect(prepare.stdout.toString()).toContain("--issue-type");
+    expect(prepare.stdout.toString()).toContain("--parent-comment-id");
+    expect(prepare.stdout.toString()).toContain("--due-date");
+    expect(prepare.stdout.toString()).toContain("--blocks");
 
     const list = cli("issue", "list", "--help");
     expect(list.exitCode).toBe(0);
     expect(list.stdout.toString()).toContain("--status");
     expect(list.stdout.toString()).toContain("--all");
     expect(list.stdout.toString()).toContain("--limit");
+    expect(list.stdout.toString()).toContain("--include-archived");
+    expect(list.stdout.toString()).toContain("--parent");
+
+    const get = cli("issue", "get", "--help");
+    expect(get.exitCode).toBe(0);
+    expect(get.stdout.toString()).toContain("--include-relations");
 
     const users = cli("issue", "user", "--help");
     expect(users.exitCode).toBe(0);

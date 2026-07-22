@@ -194,6 +194,11 @@ export class JiraCloudIssuesAdapter implements IssueProviderAdapter {
         : null,
       createdAt: issue.fields.created ?? null,
       dueDate: issue.fields.duedate ?? null,
+      estimate: null,
+      cycle: null,
+      milestone: null,
+      archivedAt: null,
+      relations: null,
       url: `${this.#baseUrl}/browse/${issue.key}`,
       updatedAt: issue.fields.updated,
       version: versionOf(issue.fields.updated, issue.id),
@@ -380,6 +385,12 @@ export class JiraCloudIssuesAdapter implements IssueProviderAdapter {
   }
 
   async list(options: IssueListOptions = {}): Promise<IssueListResult> {
+    if (options.parent || options.includeArchived) {
+      throw new ProjectContextError(
+        "OPERATION_UNSUPPORTED",
+        "Jira issue listing does not support parent or archived filters",
+      );
+    }
     const limit = options.limit ?? 30;
     const matches = options.matches?.map(jiraStatusFilter).filter(Boolean) ?? [];
     const statusFilter =
@@ -532,6 +543,7 @@ export class JiraCloudIssuesAdapter implements IssueProviderAdapter {
   }
 
   async create(input: IssueCreateInput): Promise<IssueSnapshot> {
+    this.#assertSupportedFields(input);
     const result = await this.#request<{ id: string; key: string }>("/rest/api/3/issue", "POST", {
       fields: {
         project: { id: this.target.project.id },
@@ -547,6 +559,7 @@ export class JiraCloudIssuesAdapter implements IssueProviderAdapter {
   }
 
   async update(identifier: string, input: IssueUpdateInput): Promise<IssueSnapshot> {
+    this.#assertSupportedFields(input);
     await this.#request(`/rest/api/3/issue/${encodeURIComponent(identifier)}`, "PUT", {
       fields: {
         ...(input.title === undefined ? {} : { summary: input.title }),
@@ -600,5 +613,28 @@ export class JiraCloudIssuesAdapter implements IssueProviderAdapter {
       return;
     }
     await this.comment(identifier, `Related issue: ${targetUrl}`);
+  }
+
+  #assertSupportedFields(input: IssueCreateInput | IssueUpdateInput): void {
+    const unsupported = [
+      "dueDate",
+      "estimate",
+      "cycle",
+      "milestone",
+      "parent",
+      "blocks",
+      "blockedBy",
+      "relatedTo",
+      "duplicateOf",
+      "removeBlocks",
+      "removeBlockedBy",
+      "removeRelatedTo",
+    ].find((field) => Object.hasOwn(input, field));
+    if (!unsupported) return;
+
+    throw new ProjectContextError(
+      "FIELD_UNSUPPORTED",
+      `Jira does not support the generic ${unsupported} field`,
+    );
   }
 }

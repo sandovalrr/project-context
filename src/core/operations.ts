@@ -162,6 +162,26 @@ function validateFields(
 ): void {
   const allowed = new Set(["title", "description", "labels", "assignee", "priority"]);
   if (operation === "create" && provider.type === "jira-cloud") allowed.add("issueType");
+  if (provider.type === "linear") {
+    for (const field of [
+      "dueDate",
+      "estimate",
+      "cycle",
+      "milestone",
+      "parent",
+      "blocks",
+      "blockedBy",
+      "relatedTo",
+      "duplicateOf",
+    ]) {
+      allowed.add(field);
+    }
+    if (operation === "update") {
+      for (const field of ["removeBlocks", "removeBlockedBy", "removeRelatedTo"]) {
+        allowed.add(field);
+      }
+    }
+  }
   if (provider.type === "github") allowed.delete("priority");
   for (const field of Object.keys(input)) {
     if (!allowed.has(field)) {
@@ -202,6 +222,128 @@ function validateFields(
   if (input.issueType !== undefined && typeof input.issueType !== "string") {
     throw new ProjectContextError("FIELD_INVALID", "Field issueType must be a string");
   }
+  const dueDateParts =
+    typeof input.dueDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(input.dueDate)
+      ? input.dueDate.split("-").map(Number)
+      : [];
+  const dueDate =
+    dueDateParts.length === 3
+      ? new Date(
+          Date.UTC(dueDateParts[0] as number, (dueDateParts[1] as number) - 1, dueDateParts[2]),
+        )
+      : undefined;
+  const validDueDate =
+    input.dueDate === undefined ||
+    (operation === "update" && input.dueDate === null) ||
+    (typeof input.dueDate === "string" &&
+      dueDate !== undefined &&
+      dueDate.getUTCFullYear() === dueDateParts[0] &&
+      dueDate.getUTCMonth() + 1 === dueDateParts[1] &&
+      dueDate.getUTCDate() === dueDateParts[2]);
+  if (!validDueDate) {
+    throw new ProjectContextError(
+      "FIELD_INVALID",
+      "Field dueDate must be an ISO date (YYYY-MM-DD), or null when updating",
+    );
+  }
+  if (
+    input.estimate !== undefined &&
+    !(
+      (operation === "update" && input.estimate === null) ||
+      (typeof input.estimate === "number" && Number.isFinite(input.estimate) && input.estimate >= 0)
+    )
+  ) {
+    throw new ProjectContextError(
+      "FIELD_INVALID",
+      "Field estimate must be a non-negative number, or null when updating",
+    );
+  }
+  for (const field of ["cycle", "parent", "duplicateOf"] as const) {
+    if (
+      input[field] !== undefined &&
+      (typeof input[field] !== "string" || !input[field].trim()) &&
+      !(operation === "update" && input[field] === null)
+    ) {
+      throw new ProjectContextError(
+        "FIELD_INVALID",
+        `Field ${field} must be a string, or null when updating`,
+      );
+    }
+  }
+  if (
+    input.milestone !== undefined &&
+    (typeof input.milestone !== "string" || !input.milestone.trim())
+  ) {
+    throw new ProjectContextError("FIELD_INVALID", "Field milestone must be a string");
+  }
+  for (const field of [
+    "blocks",
+    "blockedBy",
+    "relatedTo",
+    "removeBlocks",
+    "removeBlockedBy",
+    "removeRelatedTo",
+  ] as const) {
+    if (
+      input[field] !== undefined &&
+      (!Array.isArray(input[field]) ||
+        input[field].some((identifier) => typeof identifier !== "string" || !identifier.trim()))
+    ) {
+      throw new ProjectContextError(
+        "FIELD_INVALID",
+        `Field ${field} must be an array of non-empty issue identifiers`,
+      );
+    }
+  }
+}
+
+function referencedIssues(input: Record<string, unknown>): string[] {
+  const single = [input.parent, input.duplicateOf].filter(
+    (value): value is string => typeof value === "string",
+  );
+  const lists = [
+    input.blocks,
+    input.blockedBy,
+    input.relatedTo,
+    input.removeBlocks,
+    input.removeBlockedBy,
+    input.removeRelatedTo,
+  ].flatMap((value) =>
+    Array.isArray(value) ? value.filter((item) => typeof item === "string") : [],
+  );
+
+  return [...new Set([...single, ...lists])];
+}
+
+async function validateReferencedIssues(
+  adapter: IssueProviderAdapter,
+  request: IssueOperationRequest,
+): Promise<void> {
+  if (request.operation !== "create" && request.operation !== "update") return;
+
+  const references = referencedIssues(request.input);
+  if (
+    request.operation === "update" &&
+    references.some((reference) => reference === request.identifier)
+  ) {
+    throw new ProjectContextError(
+      "ISSUE_RELATION_INVALID",
+      "An issue cannot have a relationship with itself",
+    );
+  }
+
+  const referenced = await Promise.all(references.map((reference) => adapter.get(reference)));
+  if (
+    request.operation === "update" &&
+    referenced.some(
+      (issue) => issue.identifier === request.identifier || issue.id === request.identifier,
+    )
+  ) {
+    throw new ProjectContextError(
+      "ISSUE_RELATION_INVALID",
+      "An issue cannot have a relationship with itself",
+    );
+  }
 }
 
 function previewChanges(request: IssueOperationRequest): Record<string, unknown> {
@@ -210,7 +352,11 @@ function previewChanges(request: IssueOperationRequest): Record<string, unknown>
     case "update":
       return request.input;
     case "comment":
-      return { comment: request.body };
+      return {
+        comment: request.body,
+        ...(request.commentId ? { comment_id: request.commentId } : {}),
+        ...(request.parentCommentId ? { parent_comment_id: request.parentCommentId } : {}),
+      };
     case "transition":
       return { status: request.status };
     case "close":
@@ -231,6 +377,12 @@ export async function prepareIssueOperation(
   }
   if (request.operation === "comment" && !request.body.trim()) {
     throw new ProjectContextError("ISSUE_COMMENT_REQUIRED", "Issue comment cannot be empty");
+  }
+  if (request.operation === "comment" && request.commentId && request.parentCommentId) {
+    throw new ProjectContextError(
+      "ISSUE_COMMENT_MODE_INVALID",
+      "A comment write cannot edit and reply at the same time",
+    );
   }
   if (
     request.operation === "transition" &&
@@ -269,6 +421,22 @@ export async function prepareIssueOperation(
     routedRequest.operation === "create"
       ? undefined
       : await current.adapter.get(routedRequest.identifier);
+  await validateReferencedIssues(current.adapter, routedRequest);
+  if (
+    routedRequest.operation === "comment" &&
+    (routedRequest.commentId || routedRequest.parentCommentId)
+  ) {
+    if (!current.adapter.validateCommentTarget) {
+      throw new ProjectContextError(
+        "OPERATION_UNSUPPORTED",
+        `${current.provider.type} does not support comment replies or edits`,
+      );
+    }
+    await current.adapter.validateCommentTarget(routedRequest.identifier, {
+      ...(routedRequest.commentId ? { commentId: routedRequest.commentId } : {}),
+      ...(routedRequest.parentCommentId ? { parentCommentId: routedRequest.parentCommentId } : {}),
+    });
+  }
   const pending = await createPendingChange({
     repositoryId: current.repositoryId,
     gitRoot: current.gitRoot,
@@ -339,7 +507,10 @@ async function execute(
     case "update":
       return adapter.update(request.identifier, request.input as IssueUpdateInput);
     case "comment":
-      await adapter.comment(request.identifier, request.body);
+      await adapter.comment(request.identifier, request.body, {
+        ...(request.commentId ? { commentId: request.commentId } : {}),
+        ...(request.parentCommentId ? { parentCommentId: request.parentCommentId } : {}),
+      });
       return adapter.get(request.identifier);
     case "link":
       await adapter.link(request.identifier, request.targetUrl);
@@ -496,11 +667,15 @@ async function listFromRuntime(
   current: OperationRuntime,
   statuses: CanonicalStatus[] | undefined,
   limit: number | undefined,
+  includeArchived: boolean | undefined,
+  parent: string | undefined,
 ): Promise<IssueListGroup> {
   const filters = statuses ? resolveStatusFilters(current.provider, statuses) : undefined;
   const result = await current.adapter.list({
     ...(filters ? { matches: filters.map((filter) => filter.match) } : {}),
     ...(limit === undefined ? {} : { limit }),
+    ...(includeArchived === undefined ? {} : { includeArchived }),
+    ...(parent === undefined ? {} : { parent }),
   });
   const issues = result.issues.flatMap((issue) => {
     const canonicalStatus = classifyCanonicalStatus(current.provider, issue);
@@ -524,6 +699,8 @@ export async function listIssues(
     all?: boolean;
     statuses?: CanonicalStatus[];
     limit?: number;
+    includeArchived?: boolean;
+    parent?: string;
     fetcher?: typeof fetch;
   } = {},
 ): Promise<IssueListGroup[]> {
@@ -550,7 +727,13 @@ export async function listIssues(
   };
   if (!options.all) {
     return [
-      await listFromRuntime(await runtime(cwd, runtimeOptions), options.statuses, options.limit),
+      await listFromRuntime(
+        await runtime(cwd, runtimeOptions),
+        options.statuses,
+        options.limit,
+        options.includeArchived,
+        options.parent,
+      ),
     ];
   }
 
@@ -568,6 +751,8 @@ export async function listIssues(
         }),
         options.statuses,
         options.limit,
+        options.includeArchived,
+        options.parent,
       ),
     ),
   );
@@ -866,7 +1051,12 @@ export async function getIssueCapabilities(
 
 export async function getIssue(
   reference: string,
-  options: { cwd?: string; provider?: string; fetcher?: typeof fetch } = {},
+  options: {
+    cwd?: string;
+    provider?: string;
+    includeRelations?: boolean;
+    fetcher?: typeof fetch;
+  } = {},
 ): Promise<{ providerAlias: string; issue: IssueSnapshot }> {
   const current = await runtime(options.cwd ?? process.cwd(), {
     ...(options.provider ? { explicitProvider: options.provider } : {}),
@@ -875,7 +1065,11 @@ export async function getIssue(
   });
   return {
     providerAlias: current.providerAlias,
-    issue: await current.adapter.get(current.routedReference ?? reference),
+    issue: await current.adapter.get(current.routedReference ?? reference, {
+      ...(options.includeRelations === undefined
+        ? {}
+        : { includeRelations: options.includeRelations }),
+    }),
   };
 }
 

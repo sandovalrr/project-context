@@ -45,6 +45,8 @@ complete Codex, Claude, Zed, and VS Code configurations are in
   argv-only commands. Literal secrets in YAML are rejected.
 - Provider calls are restricted to fixed HTTPS origins, reject redirects, cap
   response sizes and timeouts, and never automatically retry writes.
+- Linear issue operations use a fixed allowlist of Linear's hosted MCP tools;
+  project-context never proxies the upstream server's broader tool catalog.
 - Prepared writes expire after ten minutes, are encrypted with AES-256-GCM,
   and can be claimed only once. An uncertain apply result becomes
   `indeterminate` and is never replayed automatically.
@@ -63,10 +65,14 @@ project-context setup --guided
 project-context config validate
 project-context resolve --cwd /path/to/repository
 project-context issue list --status open --status in_progress
+project-context issue list --parent linear:ENG-42
 project-context issue user search "John Smith"
 project-context issue capabilities
 project-context issue option search labels security
+project-context issue option search cycle current
+project-context issue get linear:ENG-42 --include-relations
 project-context issue comment list github:#42 --limit 20
+project-context issue prepare create --title "Child task" --parent ENG-42
 project-context doctor
 project-context audit list
 project-context skill status
@@ -90,6 +96,11 @@ The stdio server exposes eleven tools:
 Every tool has an input and output schema. Starting the server has no setup side
 effects; when host configuration is absent, tools return an actionable
 structured error.
+
+Linear additionally supports target-scoped subissues, due dates, estimates,
+cycles, milestones, blocking/related/duplicate relationships, comment replies
+and edits, archived listing, and relation-expanded reads. SLA fields, permanent
+deletion, and non-issue Linear features are not exposed.
 
 `integration manifest` prints the provider-neutral command definition by
 default. Pass `--client codex`, `claude`, `zed`, or `vscode` to emit native,
