@@ -758,6 +758,12 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
         "Linear does not support the generic issueType field",
       );
     }
+    if (input.milestone === null) {
+      throw new ProjectContextError(
+        "FIELD_UNSUPPORTED",
+        "Linear milestones cannot be cleared through the generic milestone field",
+      );
+    }
 
     const relationFields = await this.#resolvedRelationFields(session, input, sourceIdentifier);
     const cycle =
@@ -765,8 +771,8 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
         ? input.cycle
         : await this.#resolvedCycle(session, input.cycle);
     const milestone =
-      input.milestone === undefined
-        ? undefined
+      input.milestone === undefined || input.milestone === null
+        ? input.milestone
         : await this.#resolvedMilestone(session, input.milestone, projectId);
 
     return {
@@ -826,7 +832,14 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
       ? await this.#relationReference(session, relations.duplicateOf)
       : null;
 
-    return { blocks, blockedBy, relatedTo, duplicateOf };
+    return {
+      parent: null,
+      subIssues: [],
+      blocks,
+      blockedBy,
+      relatedTo,
+      duplicateOf,
+    };
   }
 
   async identity(): Promise<ProviderIdentity> {

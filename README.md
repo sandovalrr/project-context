@@ -102,6 +102,12 @@ cycles, milestones, blocking/related/duplicate relationships, comment replies
 and edits, archived listing, and relation-expanded reads. SLA fields, permanent
 deletion, and non-issue Linear features are not exposed.
 
+GitHub additionally supports repository issue types and milestones, native
+parent/subissue hierarchies, blocking dependencies, duplicate relationships,
+comment edits, direct-subissue listing, and relation-expanded reads. GitHub
+custom-field mappings, generic related-to relationships, threaded comment
+replies, pull requests, and repository administration are not exposed.
+
 `integration manifest` prints the provider-neutral command definition by
 default. Pass `--client codex`, `claude`, `zed`, or `vscode` to emit native,
 ready-to-paste configuration pinned to the installed package version. Add

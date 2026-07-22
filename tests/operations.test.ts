@@ -287,6 +287,8 @@ describe("issue capabilities", () => {
           { id: 1, name: "bug" },
           { id: 2, name: "triage" },
         ],
+        [],
+        [],
       ]);
 
       const result = await getIssueCapabilities({ cwd: repository, fetcher });
@@ -623,6 +625,7 @@ describe("issue write workflow", () => {
         { id: 1, login: "example-user" },
         issue,
         { id: 1, login: "example-user" },
+        issue,
         issue,
         {},
         { ...issue, updated_at: "2026-07-18T10:01:00Z" },

@@ -100,12 +100,19 @@ Otherwise, link with a canonical issue URL in a provider comment. Writing a
 backlink to a second issue is a separate mutation with its own preview. Never
 merge or equate issues because their titles are similar.
 
-Linear parent and relationship identifiers are not arbitrary passthrough data.
-Prepare resolves every parent, blocker, blocked issue, related issue, duplicate,
-and relationship removal through the configured target. Apply repeats those
-checks immediately before `save_issue`. Self-relations are rejected. Relation
-reads are opt-in and return no relation content unless every referenced issue
-passes target validation.
+Parent and relationship identifiers are not arbitrary passthrough data.
+Prepare resolves every supported parent, blocker, blocked issue, related issue,
+duplicate, and relationship removal through the configured target. Linear and
+GitHub apply repeat those checks inside their adapter immediately before native
+provider writes. Self-relations are rejected. Relation reads are opt-in and
+return no relation content unless every referenced issue passes target
+validation. GitHub additionally rejects cross-repository relations and requires
+configured Project membership when that narrower target is present.
+
+GitHub duplicate writes close the duplicate issue with GitHub's native
+`duplicate` reason. Clearing the relation uses the native GraphQL unmark
+mutation. GitHub's generic related-to relation and threaded comment replies are
+not approximated with comments.
 
 ## Audit policy
 

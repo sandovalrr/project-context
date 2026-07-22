@@ -18,6 +18,8 @@ export interface GitHubProjectIssueContent {
   author: { login: string; databaseId: number } | null;
   assignees: { nodes: Array<{ login: string; databaseId: number }> };
   labels: { nodes: Array<{ name: string }> };
+  issueType: { name: string } | null;
+  milestone: { number: number; title: string } | null;
 }
 
 export interface GitHubProjectIssueItem {
@@ -98,7 +100,7 @@ export class GitHubProjectClient {
           Accept: "application/vnd.github+json",
           Authorization: `Bearer ${this.token}`,
           "Content-Type": "application/json",
-          "X-GitHub-Api-Version": "2022-11-28",
+          "X-GitHub-Api-Version": "2026-03-10",
         },
         body: JSON.stringify({ query, variables }),
       },
@@ -140,6 +142,8 @@ export class GitHubProjectClient {
                   __typename
                   ... on Issue {
                     id databaseId number title body state stateReason url updatedAt createdAt
+                    issueType { name }
+                    milestone { number title }
                     repository { nameWithOwner }
                     author { login ... on User { databaseId } }
                     assignees(first: 1) { nodes { login databaseId } }

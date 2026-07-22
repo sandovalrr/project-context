@@ -182,7 +182,23 @@ function validateFields(
       }
     }
   }
-  if (provider.type === "github") allowed.delete("priority");
+  if (provider.type === "github") {
+    allowed.delete("priority");
+    for (const field of [
+      "issueType",
+      "milestone",
+      "parent",
+      "blocks",
+      "blockedBy",
+      "duplicateOf",
+    ]) {
+      allowed.add(field);
+    }
+    if (operation === "update") {
+      allowed.add("removeBlocks");
+      allowed.add("removeBlockedBy");
+    }
+  }
   for (const field of Object.keys(input)) {
     if (!allowed.has(field)) {
       throw new ProjectContextError(
@@ -219,8 +235,15 @@ function validateFields(
   ) {
     throw new ProjectContextError("FIELD_INVALID", "Field priority must be a string or number");
   }
-  if (input.issueType !== undefined && typeof input.issueType !== "string") {
-    throw new ProjectContextError("FIELD_INVALID", "Field issueType must be a string");
+  if (
+    input.issueType !== undefined &&
+    typeof input.issueType !== "string" &&
+    !(operation === "update" && input.issueType === null)
+  ) {
+    throw new ProjectContextError(
+      "FIELD_INVALID",
+      "Field issueType must be a string, or null when updating",
+    );
   }
   const dueDateParts =
     typeof input.dueDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(input.dueDate)
@@ -272,9 +295,13 @@ function validateFields(
   }
   if (
     input.milestone !== undefined &&
-    (typeof input.milestone !== "string" || !input.milestone.trim())
+    (typeof input.milestone !== "string" || !input.milestone.trim()) &&
+    !(operation === "update" && provider.type === "github" && input.milestone === null)
   ) {
-    throw new ProjectContextError("FIELD_INVALID", "Field milestone must be a string");
+    throw new ProjectContextError(
+      "FIELD_INVALID",
+      "Field milestone must be a string, or null when updating",
+    );
   }
   for (const field of [
     "blocks",

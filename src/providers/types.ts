@@ -51,6 +51,8 @@ export interface IssueReference {
 }
 
 export interface IssueRelations {
+  parent: IssueReference | null;
+  subIssues: IssueReference[];
   blocks: IssueReference[];
   blockedBy: IssueReference[];
   relatedTo: IssueReference[];
@@ -105,10 +107,11 @@ export interface IssueUpdateInput {
   labels?: string[];
   assignee?: string | null;
   priority?: string | number;
+  issueType?: string | null;
   dueDate?: string | null;
   estimate?: number | null;
   cycle?: string | null;
-  milestone?: string;
+  milestone?: string | null;
   parent?: string | null;
   blocks?: string[];
   blockedBy?: string[];

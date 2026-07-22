@@ -63,6 +63,14 @@ owns bounded item collection, membership assertions, Project enrollment, and
 Status option mutation. This prevents Project-specific concepts from leaking
 into provider-neutral operations.
 
+GitHub issue types, milestones, subissues, dependencies, duplicates, and
+comment edits remain behind that same provider-neutral interface. Repository
+REST endpoints perform the native operations. A narrow GraphQL query is used
+only to read or clear the canonical duplicate relationship, which REST does
+not return as a normal issue field. Every related issue is checked against the
+configured repository and optional Project target before content is returned
+or a write is applied.
+
 Every write revalidates the provider identity immediately before execution. A
 valid credential for the wrong Linear workspace, GitHub login, or Jira
 site/account is rejected. Provider origins are fixed to Linear, GitHub's public

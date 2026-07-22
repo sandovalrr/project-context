@@ -91,6 +91,14 @@ Status field. Direct reads and mutations verify Project membership; Project
 lists filter content type and repository. Names are never used as the security
 boundary.
 
+GitHub hierarchy, dependency, and duplicate operations resolve references
+through the configured repository before writing and repeat optional Project
+membership checks during apply. Relation reads reject missing or mismatched
+repository identities before returning the relation set. Comment edits compare
+the provider-owned `issue_url` with the configured target and revalidate the
+issue before mutation. Bounded relation pagination fails closed rather than
+returning an apparently complete partial graph.
+
 ### Valid credential for the wrong account
 
 Provider profiles bind credentials to an expected workspace, login, or Jira
@@ -163,6 +171,10 @@ publication occurs only after npm exposes that version.
   synchronizing the issue lifecycle, are separate provider writes. A failure
   between them can leave partial provider state that requires inspection; the
   client does not retry either write automatically.
+- Creating or updating an issue and then applying GitHub hierarchy, dependency,
+  or duplicate relationships may require several provider writes. A failure
+  between them is indeterminate and may leave a partial relationship set that
+  requires inspection.
 - AES encryption does not provide protection when both key and state directory
   are stolen together.
 - Metadata-only audit is not a tamper-evident or remote compliance log.

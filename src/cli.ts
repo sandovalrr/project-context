@@ -174,9 +174,11 @@ function issueFields(argv: Record<string, unknown>): Record<string, unknown> {
     if (argv[key] !== undefined) fields[key] = argv[key];
   }
   if (argv.clearAssignee === true) fields.assignee = null;
+  if (argv.clearIssueType === true) fields.issueType = null;
   if (argv.clearDueDate === true) fields.dueDate = null;
   if (argv.clearEstimate === true) fields.estimate = null;
   if (argv.clearCycle === true) fields.cycle = null;
+  if (argv.clearMilestone === true) fields.milestone = null;
   if (argv.clearParent === true) fields.parent = null;
   if (argv.clearDuplicateOf === true) fields.duplicateOf = null;
   return fields;
@@ -674,7 +676,8 @@ const cli = yargs(hideBin(process.argv))
             .option("include-relations", {
               type: "boolean",
               default: false,
-              description: "Include target-validated blocking, related, and duplicate relations",
+              description:
+                "Include target-validated parent, subissue, blocking, related, and duplicate relations",
             }),
         async (argv) =>
           print(
@@ -725,7 +728,11 @@ const cli = yargs(hideBin(process.argv))
               type: "string",
               description: "Provider-native or canonical priority",
             })
-            .option("issue-type", { type: "string", description: "Jira issue type for creation" })
+            .option("issue-type", {
+              type: "string",
+              description: "Provider-native issue type",
+            })
+            .option("clear-issue-type", { type: "boolean", default: false })
             .option("due-date", { type: "string", description: "Due date in YYYY-MM-DD format" })
             .option("estimate", { type: "number", description: "Non-negative issue estimate" })
             .option("cycle", { type: "string", description: "Target-team cycle name or ID" })
@@ -762,6 +769,7 @@ const cli = yargs(hideBin(process.argv))
             .option("clear-due-date", { type: "boolean", default: false })
             .option("clear-estimate", { type: "boolean", default: false })
             .option("clear-cycle", { type: "boolean", default: false })
+            .option("clear-milestone", { type: "boolean", default: false })
             .option("clear-parent", { type: "boolean", default: false })
             .option("clear-duplicate-of", { type: "boolean", default: false })
             .option("preset", { type: "string", description: "Explicit named creation preset" })
@@ -784,6 +792,8 @@ const cli = yargs(hideBin(process.argv))
             .conflicts("due-date", "clear-due-date")
             .conflicts("estimate", "clear-estimate")
             .conflicts("cycle", "clear-cycle")
+            .conflicts("issue-type", "clear-issue-type")
+            .conflicts("milestone", "clear-milestone")
             .conflicts("parent", "clear-parent")
             .conflicts("duplicate-of", "clear-duplicate-of")
             .conflicts("comment-id", "parent-comment-id"),

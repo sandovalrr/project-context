@@ -4,6 +4,7 @@ export interface ProviderRequestPolicy {
   provider: string;
   allowedOrigin: string;
   access: "read" | "write";
+  notFound?: "return-undefined";
 }
 
 const REQUEST_TIMEOUT_MS = 20_000;
@@ -125,6 +126,11 @@ async function requestAttempt<T>(
     await response.body?.cancel();
     await wait(delay);
     return requestAttempt(fetcher, target, init, policy, attempt + 1);
+  }
+
+  if (response.status === 404 && policy.notFound === "return-undefined") {
+    await response.body?.cancel();
+    return undefined as T;
   }
 
   if (!response.ok) {

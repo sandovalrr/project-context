@@ -176,6 +176,8 @@ describe("GitHub Issues adapter", () => {
         { id: 1, name: "bug" },
         { id: 2, name: "enhancement" },
       ],
+      [],
+      [],
     ]);
     const adapter = new GitHubIssuesAdapter(
       githubProfile,
@@ -207,11 +209,34 @@ describe("GitHub Issues adapter", () => {
           discoveryTool: "search_users",
         },
         { field: "priority", operations: [] },
-        { field: "issueType", operations: [] },
+        {
+          field: "issueType",
+          operations: ["create", "update"],
+          clearable: true,
+          discoveryTool: "search_issue_options",
+        },
+        {
+          field: "milestone",
+          operations: ["create", "update"],
+          clearable: true,
+          discoveryTool: "search_issue_options",
+        },
+        { field: "parent", operations: ["create", "update"] },
+        { field: "blocks", operations: ["create", "update"] },
+        { field: "blockedBy", operations: ["create", "update"] },
+        { field: "duplicateOf", operations: ["create", "update"] },
+        { field: "removeBlocks", operations: ["update"] },
+        { field: "removeBlockedBy", operations: ["update"] },
       ],
     });
     expect(decodeURIComponent(requests[0]?.url ?? "")).toBe(
       "https://api.github.com/repos/acme/payments/labels?per_page=100&page=1",
+    );
+    expect(decodeURIComponent(requests[1]?.url ?? "")).toBe(
+      "https://api.github.com/repos/acme/payments/issue-types",
+    );
+    expect(decodeURIComponent(requests[2]?.url ?? "")).toBe(
+      "https://api.github.com/repos/acme/payments/milestones?state=all&per_page=100&page=1",
     );
   });
 

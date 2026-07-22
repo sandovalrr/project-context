@@ -26,6 +26,8 @@ describe("CLI usability", () => {
     expect(prepare.exitCode).toBe(0);
     expect(prepare.stdout.toString()).toContain("--clear-assignee");
     expect(prepare.stdout.toString()).toContain("--issue-type");
+    expect(prepare.stdout.toString()).toContain("--clear-issue-type");
+    expect(prepare.stdout.toString()).toContain("--clear-milestone");
     expect(prepare.stdout.toString()).toContain("--parent-comment-id");
     expect(prepare.stdout.toString()).toContain("--due-date");
     expect(prepare.stdout.toString()).toContain("--blocks");
