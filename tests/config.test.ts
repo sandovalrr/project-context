@@ -85,6 +85,61 @@ describe("configuration", () => {
     expect(() => validateProjectsConfigValue(projects)).not.toThrow();
   });
 
+  test("accepts a Linear target with multiple projects and an explicit creation project", async () => {
+    const projects = await loadProjectsConfig("examples/projects.example.yaml");
+    const linear =
+      projects.projects["github.com/example/example-repository"]?.issues.providers.linear;
+    if (linear?.type !== "linear") throw new Error("test fixture missing Linear provider");
+
+    linear.target.project = {
+      include: [
+        { id: "project-1", name: "Payments" },
+        { id: "project-2", name: "Billing" },
+      ],
+      create_in: "project-2",
+    };
+
+    expect(() => validateProjectsConfigValue(projects)).not.toThrow();
+  });
+
+  test("rejects a Linear multi-project target with a creation project outside its selection", async () => {
+    const projects = await loadProjectsConfig("examples/projects.example.yaml");
+    const linear =
+      projects.projects["github.com/example/example-repository"]?.issues.providers.linear;
+    if (linear?.type !== "linear") throw new Error("test fixture missing Linear provider");
+
+    linear.target.project = {
+      include: [
+        { id: "project-1", name: "Payments" },
+        { id: "project-2", name: "Billing" },
+      ],
+      create_in: "project-3",
+    };
+
+    expect(() => validateProjectsConfigValue(projects)).toThrow(
+      "create_in must reference an included Linear project ID",
+    );
+  });
+
+  test("rejects duplicate IDs in a Linear multi-project target", async () => {
+    const projects = await loadProjectsConfig("examples/projects.example.yaml");
+    const linear =
+      projects.projects["github.com/example/example-repository"]?.issues.providers.linear;
+    if (linear?.type !== "linear") throw new Error("test fixture missing Linear provider");
+
+    linear.target.project = {
+      include: [
+        { id: "project-1", name: "Payments" },
+        { id: "project-1", name: "Payments renamed" },
+      ],
+      create_in: "project-1",
+    };
+
+    expect(() => validateProjectsConfigValue(projects)).toThrow(
+      "must not include the same Linear project ID more than once",
+    );
+  });
+
   test("accepts a GitHub Projects v2 target with a stable Status field identity", async () => {
     const projects = await loadProjectsConfig("examples/projects.example.yaml");
     const github =

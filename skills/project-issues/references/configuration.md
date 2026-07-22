@@ -19,9 +19,11 @@ to preview an older host configuration and `project-context config migrate
 The project registry is keyed by normalized Git remote, such as `github.com/example/example-repository`. Provider profiles bind expected identities to credential aliases. Project entries select a default provider and provider-specific targets. Use stable provider IDs as authoritative values and names only as display metadata.
 
 A Linear target requires a team plus a project policy. Use an `{id, name}`
-object for one project, `none` for only unprojected issues, or `any` for every
-projected and unprojected issue in that team. `any` does not include other
-teams, and creation through it leaves the new issue unprojected.
+object for one project, an `{include, create_in}` object for an explicit set of
+projects, `none` for only unprojected issues, or `any` for every projected and
+unprojected issue in that team. Multi-project `include` entries use stable IDs;
+`create_in` is required and must name one of those IDs. `any` does not include
+other teams, and creation through it leaves the new issue unprojected.
 
 Use the repository's `examples/` and `schemas/` directories for starter YAML and validation details. Never copy real tokens into example files.
 

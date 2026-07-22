@@ -5,13 +5,16 @@
 - Authentication: personal API key.
 - Expected identity: workspace ID and display name.
 - Required target: team.
-- Project policy: explicit project object, `none` for unprojected issues, or
-  `any` for all projected and unprojected issues in the configured team.
+- Project policy: one explicit project, an explicit multi-project selection,
+  `none` for unprojected issues, or `any` for all projected and unprojected
+  issues in the configured team.
 - Search, direct lookup, and mutation revalidation reject issues outside the
   configured team/project policy. `any` relaxes only project membership and
   never team membership.
 - Creation under `any` sets the configured team and leaves the new issue
   unprojected.
+- A multi-project selection restricts reads and mutations to its `include`
+  list and creates issues in its required `create_in` project.
 - User discovery returns active members of the configured team and uses the
   Linear user ID as `assignee`.
 - Capabilities return team labels and Linear's canonical numeric priorities.

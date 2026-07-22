@@ -46,6 +46,16 @@ const linearTeamTarget: LinearProjectProvider["target"] = {
   team: { id: "team-1", name: "Engineering" },
   project: "any",
 };
+const linearMultiProjectTarget: LinearProjectProvider["target"] = {
+  team: { id: "team-1", name: "Engineering" },
+  project: {
+    include: [
+      { id: "project-1", name: "Payments" },
+      { id: "project-2", name: "Billing" },
+    ],
+    create_in: "project-2",
+  },
+};
 
 function linearIssue(teamId: string, projectId?: string) {
   return {
@@ -675,6 +685,30 @@ describe("Linear adapter", () => {
     });
   });
 
+  test("accepts only issues in the selected Linear projects", async () => {
+    const { fetcher } = mockFetch([
+      { data: { issue: linearIssue("team-1", "project-1") } },
+      { data: { issue: linearIssue("team-1", "project-2") } },
+      { data: { issue: linearIssue("team-1", "project-3") } },
+      { data: { issue: linearIssue("team-1") } },
+      { data: { issue: linearIssue("team-2", "project-1") } },
+    ]);
+    const adapter = new LinearIssuesAdapter(
+      linearProfile,
+      linearMultiProjectTarget,
+      { token: "secret" },
+      fetcher,
+    );
+
+    expect((await adapter.get("ENG-1")).identifier).toBe("ENG-1");
+    expect((await adapter.get("ENG-2")).identifier).toBe("ENG-1");
+    await expect(adapter.get("ENG-3")).rejects.toMatchObject({ code: "ISSUE_OUTSIDE_TARGET" });
+    await expect(adapter.get("ENG-4")).rejects.toMatchObject({ code: "ISSUE_OUTSIDE_TARGET" });
+    await expect(adapter.get("OTHER-1")).rejects.toMatchObject({
+      code: "ISSUE_OUTSIDE_TARGET",
+    });
+  });
+
   test("rejects an issue in a different team", async () => {
     const { fetcher } = mockFetch([{ data: { issue: linearIssue("team-2") } }]);
     const adapter = new LinearIssuesAdapter(
@@ -741,6 +775,25 @@ describe("Linear adapter", () => {
     expect(body.variables.filter).not.toHaveProperty("project");
   });
 
+  test("searches only the selected Linear projects", async () => {
+    const { fetcher, requests } = mockFetch([
+      { data: { issues: { nodes: [linearIssue("team-1", "project-1")] } } },
+    ]);
+    const adapter = new LinearIssuesAdapter(
+      linearProfile,
+      linearMultiProjectTarget,
+      { token: "secret" },
+      fetcher,
+    );
+
+    expect((await adapter.search("targeted", 1))[0]?.identifier).toBe("ENG-1");
+    const body = JSON.parse(String(requests[0]?.init?.body));
+    expect(body.variables.filter).toMatchObject({
+      team: { id: { eq: "team-1" } },
+      project: { id: { in: ["project-1", "project-2"] } },
+    });
+  });
+
   test("lists projected and unprojected issues across a team-wide target", async () => {
     const { fetcher, requests } = mockFetch([
       {
@@ -762,6 +815,32 @@ describe("Linear adapter", () => {
     expect((await adapter.list()).issues).toHaveLength(2);
     const body = JSON.parse(String(requests[0]?.init?.body));
     expect(body.variables.filter).toEqual({ team: { id: { eq: "team-1" } } });
+  });
+
+  test("lists only issues in the selected Linear projects", async () => {
+    const { fetcher, requests } = mockFetch([
+      {
+        data: {
+          issues: {
+            nodes: [linearIssue("team-1", "project-1"), linearIssue("team-1", "project-2")],
+            pageInfo: { hasNextPage: false },
+          },
+        },
+      },
+    ]);
+    const adapter = new LinearIssuesAdapter(
+      linearProfile,
+      linearMultiProjectTarget,
+      { token: "secret" },
+      fetcher,
+    );
+
+    expect((await adapter.list()).issues).toHaveLength(2);
+    const body = JSON.parse(String(requests[0]?.init?.body));
+    expect(body.variables.filter).toEqual({
+      team: { id: { eq: "team-1" } },
+      project: { id: { in: ["project-1", "project-2"] } },
+    });
   });
 
   test("lists status matches inside the configured target in updated order", async () => {
@@ -853,6 +932,25 @@ describe("Linear adapter", () => {
     const body = JSON.parse(String(requests[0]?.init?.body));
     expect(body.variables.input).toMatchObject({ title: "Broken build", teamId: "team-1" });
     expect(body.variables.input).not.toHaveProperty("projectId");
+  });
+
+  test("creates a Linear issue in the explicit multi-project creation target", async () => {
+    const issue = linearIssue("team-1", "project-2");
+    const { fetcher, requests } = mockFetch([{ data: { issueCreate: { success: true, issue } } }]);
+    const adapter = new LinearIssuesAdapter(
+      linearProfile,
+      linearMultiProjectTarget,
+      { token: "secret" },
+      fetcher,
+    );
+
+    expect((await adapter.create({ title: "Broken build" })).identifier).toBe("ENG-1");
+    const body = JSON.parse(String(requests[0]?.init?.body));
+    expect(body.variables.input).toMatchObject({
+      title: "Broken build",
+      teamId: "team-1",
+      projectId: "project-2",
+    });
   });
 
   test("resolves label names and canonical priority before creation", async () => {

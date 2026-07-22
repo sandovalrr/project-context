@@ -91,6 +91,8 @@ projects:
 Linear requires a team and one explicit project policy:
 
 - An `{id, name}` object includes only that project.
+- An `{include, create_in}` object includes several named projects. `create_in`
+  is required and must equal one of the included project IDs.
 - `none` includes only issues without a project.
 - `any` includes projected and unprojected issues across the configured team.
 
@@ -104,6 +106,24 @@ target:
     id: 00000000-0000-4000-8000-000000000002
     name: Engineering
   project: any
+```
+
+Use stable Linear project IDs for a multi-project selection. Direct reads,
+lists, searches, and mutations reject issues outside `include`. New issues are
+created in `create_in`; list order never controls issue placement.
+
+```yaml
+target:
+  team:
+    id: 00000000-0000-4000-8000-000000000002
+    name: Engineering
+  project:
+    include:
+      - id: 00000000-0000-4000-8000-000000000003
+        name: Notifications
+      - id: 00000000-0000-4000-8000-000000000004
+        name: Conditions
+    create_in: 00000000-0000-4000-8000-000000000003
 ```
 
 Jira Cloud requires a project ID/name. A GitHub target can be `inherit` for a

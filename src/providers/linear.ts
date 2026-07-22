@@ -225,24 +225,34 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
   #targetFilter(): Record<string, unknown> {
     const project = this.target.project;
 
+    if (project === "any") {
+      return { team: { id: { eq: this.target.team.id } } };
+    }
+
+    const projectFilter =
+      project === "none"
+        ? { null: true }
+        : "include" in project
+          ? { id: { in: project.include.map(({ id }) => id) } }
+          : { id: { eq: project.id } };
+
     return {
       team: { id: { eq: this.target.team.id } },
-      ...(project === "any"
-        ? {}
-        : {
-            project: project === "none" ? { null: true } : { id: { eq: project.id } },
-          }),
+      project: projectFilter,
     };
   }
 
   #assertTarget(issue: LinearIssue): void {
+    const project = this.target.project;
     const teamMatches = issue.team?.id === this.target.team.id;
     const projectMatches =
-      this.target.project === "any" ||
+      project === "any" ||
       (Object.hasOwn(issue, "project") &&
-        (this.target.project === "none"
+        (project === "none"
           ? issue.project === null
-          : issue.project?.id === this.target.project.id));
+          : "include" in project
+            ? project.include.some(({ id }) => id === issue.project?.id)
+            : issue.project?.id === project.id));
     if (teamMatches && projectMatches) return;
 
     throw new ProjectContextError(
@@ -563,11 +573,17 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
 
   async create(input: IssueCreateInput): Promise<IssueSnapshot> {
     const project = this.target.project;
+    const projectId =
+      typeof project === "string"
+        ? undefined
+        : "include" in project
+          ? project.create_in
+          : project.id;
     const variables = {
       input: {
         ...(await this.#input(input)),
         teamId: this.target.team.id,
-        ...(typeof project === "string" ? {} : { projectId: project.id }),
+        ...(projectId ? { projectId } : {}),
       },
     };
     const data = await this.#graphql<{ issueCreate: { success: boolean; issue: LinearIssue } }>(
