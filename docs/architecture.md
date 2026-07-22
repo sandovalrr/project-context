@@ -76,6 +76,12 @@ not proxy Linear's tool catalog. A minimal direct Linear API query remains for
 the expected workspace ID because the hosted MCP does not expose workspace
 identity. See [Linear MCP integration](linear-mcp.md).
 
+The Linear adapter keeps planning fields, subissue parents, relationships, and
+comment modes behind that same seam. The upstream tool name and its broader
+field catalog never become caller-controlled. Target validation is reused for
+primary issues and every referenced issue; comment ownership has a separate
+bounded internal seam.
+
 ## Mutation protocol
 
 All writes have two phases:

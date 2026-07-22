@@ -40,7 +40,13 @@ const issueOptionSchema = z.object({
   value: z.union([z.string(), z.number()]),
   label: z.string(),
 });
-const issueOptionFieldSchema = z.enum(["labels", "priority", "issueType"]);
+const issueOptionFieldSchema = z.enum(["labels", "priority", "issueType", "cycle", "milestone"]);
+const issueReferenceSchema = z.object({
+  id: z.string(),
+  identifier: z.string(),
+  title: z.string(),
+  url: z.string().url(),
+});
 const issueSchema = z.object({
   provider: providerTypeSchema,
   id: z.string(),
@@ -55,6 +61,18 @@ const issueSchema = z.object({
   issueType: issueOptionSchema.nullable(),
   createdAt: z.string().nullable(),
   dueDate: z.string().nullable(),
+  estimate: z.number().nullable(),
+  cycle: issueOptionSchema.nullable(),
+  milestone: issueOptionSchema.nullable(),
+  archivedAt: z.string().nullable(),
+  relations: z
+    .object({
+      blocks: z.array(issueReferenceSchema),
+      blockedBy: z.array(issueReferenceSchema),
+      relatedTo: z.array(issueReferenceSchema),
+      duplicateOf: issueReferenceSchema.nullable(),
+    })
+    .nullable(),
   url: z.string().url(),
   updatedAt: z.string(),
   version: z.string(),
@@ -130,6 +148,18 @@ const issueFieldNameSchema = z.enum([
   "assignee",
   "priority",
   "issueType",
+  "dueDate",
+  "estimate",
+  "cycle",
+  "milestone",
+  "parent",
+  "blocks",
+  "blockedBy",
+  "relatedTo",
+  "duplicateOf",
+  "removeBlocks",
+  "removeBlockedBy",
+  "removeRelatedTo",
 ]);
 const capabilitiesResultSchema = z.array(
   z.object({
@@ -145,7 +175,7 @@ const capabilitiesResultSchema = z.array(
         options: z.array(issueOptionSchema),
         optionsTruncated: z.boolean(),
         defaultValue: z.union([z.string(), z.number()]).nullable(),
-        discoveryTool: z.enum(["search_users", "search_issue_options"]).nullable(),
+        discoveryTool: z.enum(["search_users", "search_issue_options", "get_issue"]).nullable(),
       }),
     ),
     canonicalStatuses: z.array(canonicalStatusSchema),
@@ -231,6 +261,8 @@ function requestFromTool(input: {
   identifier?: string | undefined;
   fields?: Record<string, unknown> | undefined;
   body?: string | undefined;
+  comment_id?: string | undefined;
+  parent_comment_id?: string | undefined;
   status?: string | undefined;
   target_url?: string | undefined;
   preset?: string | undefined;
@@ -250,7 +282,13 @@ function requestFromTool(input: {
   }
   if (input.operation === "comment") {
     if (!input.body) throw new ProjectContextError("ARGUMENT_REQUIRED", "comment requires body");
-    return { operation: "comment", identifier: input.identifier, body: input.body };
+    return {
+      operation: "comment",
+      identifier: input.identifier,
+      body: input.body,
+      ...(input.comment_id ? { commentId: input.comment_id } : {}),
+      ...(input.parent_comment_id ? { parentCommentId: input.parent_comment_id } : {}),
+    };
   }
   if (input.operation === "transition") {
     if (!input.status)
@@ -270,7 +308,7 @@ export function createProjectIssuesServer(): McpServer {
     { name: SERVER_NAME, version: PACKAGE_VERSION },
     {
       instructions:
-        "Resolve repository context before issue work. Use list_issues for canonical status filters, search_issues only for title or description text, and list_issue_comments only for an issue's comment discussion rather than full activity history. Use get_issue_capabilities before creating or when exact field options are unknown, and search_issue_options when a capability points to it or its catalog is truncated. Use list_users or search_users to obtain an exact assignee value before assigning; ask the user to choose when matches are ambiguous. Reads are provider-routed. External writes require prepare_issue_change followed by apply_issue_change using the returned short-lived token.",
+        "Resolve repository context before issue work. Use list_issues for canonical status or direct-parent filters, search_issues only for title or description text, and list_issue_comments only for an issue's comment discussion rather than full activity history. Request relation expansion only when needed. Use get_issue_capabilities before creating or when exact field options are unknown, and search_issue_options when a capability points to it or its catalog is truncated. Use list_users or search_users to obtain an exact assignee value before assigning; ask the user to choose when matches are ambiguous. Reads are provider-routed. External writes, including subissues, relationships, comment replies, and comment edits, require prepare_issue_change followed by apply_issue_change using the returned short-lived token. SLA fields are unsupported.",
     },
   );
 
@@ -292,7 +330,7 @@ export function createProjectIssuesServer(): McpServer {
     {
       title: "List issues",
       description:
-        "List issues ordered by most recently updated, optionally filtered by canonical status in the default, selected, or all configured providers.",
+        "List issues ordered by most recently updated, optionally filtered by canonical status or target-scoped parent in the default, selected, or all configured providers.",
       inputSchema: {
         statuses: z
           .array(canonicalStatusSchema)
@@ -307,11 +345,20 @@ export function createProjectIssuesServer(): McpServer {
           .optional()
           .describe("List from all configured providers only when explicitly true"),
         limit: z.number().int().min(1).max(100).optional(),
+        include_archived: z
+          .boolean()
+          .optional()
+          .describe("Include archived issues when the configured provider supports it"),
+        parent: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("List direct subissues of this target-scoped parent issue"),
       },
       outputSchema: resultSchema(listResultSchema),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     },
-    ({ statuses, cwd, provider, all, limit }) =>
+    ({ statuses, cwd, provider, all, limit, include_archived, parent }) =>
       safely(async () =>
         listIssues({
           cwd: await resolveMcpWorkingDirectory(server, cwd),
@@ -319,6 +366,8 @@ export function createProjectIssuesServer(): McpServer {
           ...(provider ? { provider } : {}),
           ...(all === undefined ? {} : { all }),
           ...(limit === undefined ? {} : { limit }),
+          ...(include_archived === undefined ? {} : { includeArchived: include_archived }),
+          ...(parent === undefined ? {} : { parent }),
         }),
       ),
   );
@@ -420,7 +469,7 @@ export function createProjectIssuesServer(): McpServer {
     {
       title: "Search issue options",
       description:
-        "Search target-scoped labels, priorities, or issue types. Pass returned option values unchanged and treat truncated results as incomplete.",
+        "Search target-scoped labels, priorities, issue types, cycles, or milestones. Pass returned option values unchanged and treat truncated results as incomplete.",
       inputSchema: {
         field: issueOptionFieldSchema,
         query: z.string().min(1),
@@ -479,15 +528,24 @@ export function createProjectIssuesServer(): McpServer {
       title: "Get issue",
       description:
         "Get one issue using deterministic URL, qualified-reference, or identifier routing.",
-      inputSchema: { reference: z.string().min(1), cwd: cwdSchema, provider: providerSchema },
+      inputSchema: {
+        reference: z.string().min(1),
+        include_relations: z
+          .boolean()
+          .optional()
+          .describe("Include target-validated blocking, related, and duplicate relations"),
+        cwd: cwdSchema,
+        provider: providerSchema,
+      },
       outputSchema: resultSchema(getResultSchema),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     },
-    ({ reference, cwd, provider }) =>
+    ({ reference, include_relations, cwd, provider }) =>
       safely(async () =>
         getIssue(reference, {
           cwd: await resolveMcpWorkingDirectory(server, cwd),
           ...(provider ? { provider } : {}),
+          ...(include_relations === undefined ? {} : { includeRelations: include_relations }),
         }),
       ),
   );
@@ -528,6 +586,16 @@ export function createProjectIssuesServer(): McpServer {
         identifier: z.string().min(1).optional(),
         fields: z.record(z.string(), z.unknown()).optional(),
         body: z.string().min(1).optional(),
+        comment_id: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Edit this existing comment after verifying it belongs to the target issue"),
+        parent_comment_id: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Reply to this comment after verifying it belongs to the target issue"),
         status: z.enum(["open", "in_progress", "done", "canceled"]).optional(),
         target_url: z.string().url().optional(),
         preset: z.string().min(1).optional(),

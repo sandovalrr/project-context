@@ -39,6 +39,11 @@ pull-request comments through its Issues API.
 Providers use bounded pagination and normalize results newest first; a
 `truncated` result means older comments were not returned.
 
+Linear comment replies and edits first prove that the referenced comment is in
+the target issue's bounded comment stream. The check runs during prepare and
+again during apply. If ownership cannot be proven within ten 250-comment pages,
+the write fails closed.
+
 ## Missing repository configuration
 
 Normal coding work may continue with issue integration marked unresolved.
@@ -94,6 +99,13 @@ Use a native relationship within one provider when the adapter supports it.
 Otherwise, link with a canonical issue URL in a provider comment. Writing a
 backlink to a second issue is a separate mutation with its own preview. Never
 merge or equate issues because their titles are similar.
+
+Linear parent and relationship identifiers are not arbitrary passthrough data.
+Prepare resolves every parent, blocker, blocked issue, related issue, duplicate,
+and relationship removal through the configured target. Apply repeats those
+checks immediately before `save_issue`. Self-relations are rejected. Relation
+reads are opt-in and return no relation content unless every referenced issue
+passes target validation.
 
 ## Audit policy
 

@@ -203,6 +203,24 @@ describe("Linear MCP issue adapter", () => {
     expect(call.mock.calls.every(([, input]) => input.includeArchived === false)).toBe(true);
   });
 
+  test("opts into archived issues and filters subissues by their validated parent", async () => {
+    const { connector, call } = mockConnector((tool, input) =>
+      tool === "get_issue"
+        ? linearIssue(String(input.id), { projectId: "project-1" })
+        : issuePage([linearIssue("ENG-2", { projectId: String(input.project) })]),
+    );
+
+    const result = await adapter(multiProjectTarget, connector).list({
+      includeArchived: true,
+      parent: "ENG-1",
+    });
+
+    expect(result.issues[0]?.identifier).toBe("ENG-2");
+    const listCalls = call.mock.calls.filter(([tool]) => tool === "list_issues");
+    expect(listCalls.every(([, input]) => input.includeArchived === true)).toBe(true);
+    expect(listCalls.every(([, input]) => input.parentId === "ENG-1")).toBe(true);
+  });
+
   test("applies canonical state and label matches after target-scoped collection", async () => {
     const { connector } = mockConnector(() =>
       issuePage([
@@ -256,6 +274,8 @@ describe("Linear MCP issue adapter", () => {
 
   test("reports and searches team-scoped labels with fixed Linear priorities", async () => {
     const { connector } = mockConnector((tool, input) => {
+      if (tool === "list_cycles") return [];
+      if (tool === "list_milestones") return { milestones: [] };
       expect(tool).toBe("list_issue_labels");
       const labels = [
         { id: "label-1", name: "bug" },
@@ -265,15 +285,21 @@ describe("Linear MCP issue adapter", () => {
     });
     const issues = adapter(noProjectTarget, connector);
 
-    expect(await issues.capabilities()).toMatchObject({
-      fields: [
-        { field: "title" },
-        { field: "description" },
-        { field: "labels", options: [{ value: "bug" }, { value: "backend" }] },
-        { field: "assignee" },
-        { field: "priority", defaultValue: 0 },
-        { field: "issueType", operations: [] },
-      ],
+    const capabilities = await issues.capabilities();
+    expect(capabilities.fields.find(({ field }) => field === "labels")).toMatchObject({
+      options: [{ value: "bug" }, { value: "backend" }],
+    });
+    expect(capabilities.fields.find(({ field }) => field === "priority")).toMatchObject({
+      defaultValue: 0,
+    });
+    expect(capabilities.fields.find(({ field }) => field === "dueDate")).toMatchObject({
+      operations: ["create", "update"],
+    });
+    expect(capabilities.fields.find(({ field }) => field === "parent")).toMatchObject({
+      operations: ["create", "update"],
+    });
+    expect(capabilities.fields.find(({ field }) => field === "removeBlocks")).toMatchObject({
+      operations: ["update"],
     });
     expect(await issues.searchOptions("labels", "bug", 1)).toMatchObject({
       options: [{ value: "bug", label: "bug" }],
@@ -402,6 +428,100 @@ describe("Linear MCP issue adapter", () => {
     });
   });
 
+  test("creates target-scoped subissues with planning fields and relationships", async () => {
+    const { connector, call } = mockConnector((tool, input) => {
+      if (tool === "list_cycles") {
+        return [{ id: "cycle-1", name: "Cycle 1", number: 1 }];
+      }
+      if (tool === "list_milestones") {
+        return { milestones: [{ id: "milestone-1", name: "Beta" }] };
+      }
+      if (tool === "get_issue") {
+        return linearIssue(String(input.id), { projectId: "project-2" });
+      }
+      if (tool === "save_issue") return { id: "ENG-3" };
+      throw new Error(`unexpected tool ${tool}`);
+    });
+
+    const result = await adapter(multiProjectTarget, connector).create({
+      title: "Child issue",
+      parent: "ENG-1",
+      dueDate: "2026-08-01",
+      estimate: 3,
+      cycle: "cycle-1",
+      milestone: "milestone-1",
+      blocks: ["ENG-2"],
+      relatedTo: ["ENG-4"],
+    });
+
+    expect(result.identifier).toBe("ENG-3");
+    expect(call.mock.calls.find(([tool]) => tool === "save_issue")?.[1]).toMatchObject({
+      title: "Child issue",
+      parentId: "ENG-1",
+      dueDate: "2026-08-01",
+      estimate: 3,
+      cycle: "cycle-1",
+      milestone: "milestone-1",
+      blocks: ["ENG-2"],
+      relatedTo: ["ENG-4"],
+    });
+    expect(
+      call.mock.calls.filter(([tool]) => tool === "get_issue").map(([, input]) => input.id),
+    ).toEqual(expect.arrayContaining(["ENG-1", "ENG-2", "ENG-4", "ENG-3"]));
+  });
+
+  test("returns relations only after every related issue passes target validation", async () => {
+    const primary = {
+      ...linearIssue("ENG-1"),
+      relations: {
+        blocks: [{ id: "ENG-2", title: "Blocked issue" }],
+        blockedBy: [],
+        relatedTo: [{ id: "ENG-3", title: "Related issue" }],
+        duplicateOf: null,
+      },
+    };
+    const { connector, call } = mockConnector((tool, input) => {
+      expect(tool).toBe("get_issue");
+      return input.id === "ENG-1" ? primary : linearIssue(String(input.id));
+    });
+
+    const result = await adapter(noProjectTarget, connector).get("ENG-1", {
+      includeRelations: true,
+    });
+
+    expect(result.relations).toMatchObject({
+      blocks: [{ identifier: "ENG-2" }],
+      relatedTo: [{ identifier: "ENG-3" }],
+      duplicateOf: null,
+    });
+    expect(call.mock.calls[0]?.[1]).toEqual({ id: "ENG-1", includeRelations: true });
+  });
+
+  test("rejects relation reads when a related issue is outside the configured target", async () => {
+    const sensitiveTitle = "must not escape";
+    const { connector } = mockConnector((_tool, input) =>
+      input.includeRelations
+        ? {
+            ...linearIssue("ENG-1"),
+            relations: {
+              blocks: [{ id: "OTHER-1", title: sensitiveTitle }],
+              blockedBy: [],
+              relatedTo: [],
+              duplicateOf: null,
+            },
+          }
+        : linearIssue("OTHER-1", { teamId: "team-2" }),
+    );
+
+    try {
+      await adapter(noProjectTarget, connector).get("ENG-1", { includeRelations: true });
+      throw new Error("expected target rejection");
+    } catch (error) {
+      expect(error).toMatchObject({ code: "ISSUE_OUTSIDE_TARGET" });
+      expect(String(error)).not.toContain(sensitiveTitle);
+    }
+  });
+
   test("revalidates updates and transitions through the existing target", async () => {
     const { connector, call } = mockConnector((tool, input) => {
       if (tool === "get_issue") return linearIssue(String(input.id));
@@ -424,6 +544,19 @@ describe("Linear MCP issue adapter", () => {
     });
   });
 
+  test("rejects a self-relationship after resolving the referenced issue", async () => {
+    const { connector, call } = mockConnector((tool, input) => {
+      if (tool === "get_issue") return linearIssue(String(input.id));
+      if (tool === "save_issue") return { id: String(input.id) };
+      throw new Error(`unexpected tool ${tool}`);
+    });
+
+    await expect(
+      adapter(noProjectTarget, connector).update("ENG-1", { relatedTo: ["ENG-1"] }),
+    ).rejects.toMatchObject({ code: "ISSUE_RELATION_INVALID" });
+    expect(call.mock.calls.some(([tool]) => tool === "save_issue")).toBe(false);
+  });
+
   test("keeps links inside the approved comment workflow", async () => {
     const { connector, call } = mockConnector((tool, input) =>
       tool === "get_issue" ? linearIssue(String(input.id)) : {},
@@ -435,6 +568,38 @@ describe("Linear MCP issue adapter", () => {
       issueId: "ENG-1",
       body: "Related issue: https://example.com/issues/2",
     });
+  });
+
+  test("replies to and edits only comments belonging to the target issue", async () => {
+    const comments = {
+      comments: [
+        {
+          id: "comment-1",
+          body: "Existing",
+          createdAt: "2026-07-18T10:00:00Z",
+          updatedAt: "2026-07-18T10:00:00Z",
+          author: null,
+        },
+      ],
+      hasNextPage: false,
+    };
+    const { connector, call } = mockConnector((tool, input) => {
+      if (tool === "get_issue") return linearIssue(String(input.id));
+      if (tool === "list_comments") return comments;
+      if (tool === "save_comment") return { id: String(input.id ?? "comment-2") };
+      throw new Error(`unexpected tool ${tool}`);
+    });
+    const issues = adapter(noProjectTarget, connector);
+
+    await issues.comment("ENG-1", "Reply", { parentCommentId: "comment-1" });
+    await issues.comment("ENG-1", "Edited", { commentId: "comment-1" });
+
+    expect(
+      call.mock.calls.filter(([tool]) => tool === "save_comment").map(([, input]) => input),
+    ).toEqual([
+      { issueId: "ENG-1", parentId: "comment-1", body: "Reply" },
+      { id: "comment-1", body: "Edited" },
+    ]);
   });
 
   test("fails closed when Linear MCP response fields drift", async () => {

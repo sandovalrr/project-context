@@ -21,7 +21,7 @@ export interface IssueOption {
   label: string;
 }
 
-export type IssueOptionField = "labels" | "priority" | "issueType";
+export type IssueOptionField = "labels" | "priority" | "issueType" | "cycle" | "milestone";
 
 export interface IssueOptionListResult {
   options: IssueOption[];
@@ -43,6 +43,20 @@ export interface IssueCommentListResult {
   truncated: boolean;
 }
 
+export interface IssueReference {
+  id: string;
+  identifier: string;
+  title: string;
+  url: string;
+}
+
+export interface IssueRelations {
+  blocks: IssueReference[];
+  blockedBy: IssueReference[];
+  relatedTo: IssueReference[];
+  duplicateOf: IssueReference | null;
+}
+
 export interface IssueSnapshot {
   provider: ProviderType;
   id: string;
@@ -57,6 +71,11 @@ export interface IssueSnapshot {
   issueType: IssueOption | null;
   createdAt: string | null;
   dueDate: string | null;
+  estimate: number | null;
+  cycle: IssueOption | null;
+  milestone: IssueOption | null;
+  archivedAt: string | null;
+  relations: IssueRelations | null;
   url: string;
   updatedAt: string;
   version: string;
@@ -69,6 +88,15 @@ export interface IssueCreateInput {
   assignee?: string;
   priority?: string | number;
   issueType?: string;
+  dueDate?: string;
+  estimate?: number;
+  cycle?: string;
+  milestone?: string;
+  parent?: string;
+  blocks?: string[];
+  blockedBy?: string[];
+  relatedTo?: string[];
+  duplicateOf?: string;
 }
 
 export interface IssueUpdateInput {
@@ -77,11 +105,34 @@ export interface IssueUpdateInput {
   labels?: string[];
   assignee?: string | null;
   priority?: string | number;
+  dueDate?: string | null;
+  estimate?: number | null;
+  cycle?: string | null;
+  milestone?: string;
+  parent?: string | null;
+  blocks?: string[];
+  blockedBy?: string[];
+  relatedTo?: string[];
+  duplicateOf?: string | null;
+  removeBlocks?: string[];
+  removeBlockedBy?: string[];
+  removeRelatedTo?: string[];
 }
 
 export interface IssueListOptions {
   matches?: StatusMatch[];
   limit?: number;
+  includeArchived?: boolean;
+  parent?: string;
+}
+
+export interface IssueGetOptions {
+  includeRelations?: boolean;
+}
+
+export interface IssueCommentWriteOptions {
+  commentId?: string;
+  parentCommentId?: string;
 }
 
 export interface IssueListResult {
@@ -109,7 +160,19 @@ export type IssueFieldName =
   | "labels"
   | "assignee"
   | "priority"
-  | "issueType";
+  | "issueType"
+  | "dueDate"
+  | "estimate"
+  | "cycle"
+  | "milestone"
+  | "parent"
+  | "blocks"
+  | "blockedBy"
+  | "relatedTo"
+  | "duplicateOf"
+  | "removeBlocks"
+  | "removeBlockedBy"
+  | "removeRelatedTo";
 
 export type IssueFieldOperation = "create" | "update";
 
@@ -122,7 +185,7 @@ export interface IssueFieldCapability {
   options: IssueOption[];
   optionsTruncated: boolean;
   defaultValue: string | number | null;
-  discoveryTool: "search_users" | "search_issue_options" | null;
+  discoveryTool: "search_users" | "search_issue_options" | "get_issue" | null;
 }
 
 export interface ProviderIssueCapabilities {
@@ -142,11 +205,12 @@ export interface IssueProviderAdapter {
     limit?: number,
   ): Promise<IssueOptionListResult>;
   capabilities(): Promise<ProviderIssueCapabilities>;
-  get(identifier: string): Promise<IssueSnapshot>;
+  get(identifier: string, options?: IssueGetOptions): Promise<IssueSnapshot>;
   listComments(identifier: string, limit?: number): Promise<IssueCommentListResult>;
   create(input: IssueCreateInput): Promise<IssueSnapshot>;
   update(identifier: string, input: IssueUpdateInput): Promise<IssueSnapshot>;
-  comment(identifier: string, body: string): Promise<void>;
+  validateCommentTarget?(identifier: string, options: IssueCommentWriteOptions): Promise<void>;
+  comment(identifier: string, body: string, options?: IssueCommentWriteOptions): Promise<void>;
   transition(
     identifier: string,
     nativeStatus: string,

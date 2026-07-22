@@ -428,14 +428,25 @@ function linearIssue(projectId?: string) {
 }
 
 const linearMcpTools = {
-  get_issue: ["id"],
+  get_issue: ["id", "includeRelations"],
   get_user: ["query"],
   list_comments: ["issueId", "limit", "cursor", "orderBy"],
+  list_cycles: ["teamId", "type"],
   list_issue_labels: ["team", "name", "limit", "cursor"],
   list_issue_statuses: ["team"],
-  list_issues: ["team", "project", "query", "limit", "cursor", "orderBy", "includeArchived"],
+  list_issues: [
+    "team",
+    "project",
+    "query",
+    "limit",
+    "cursor",
+    "orderBy",
+    "includeArchived",
+    "parentId",
+  ],
+  list_milestones: ["project"],
   list_users: ["team", "query", "limit", "cursor"],
-  save_comment: ["issueId", "body"],
+  save_comment: ["id", "issueId", "parentId", "body"],
   save_issue: [
     "id",
     "title",
@@ -446,6 +457,18 @@ const linearMcpTools = {
     "assignee",
     "priority",
     "labels",
+    "cycle",
+    "milestone",
+    "dueDate",
+    "parentId",
+    "estimate",
+    "blocks",
+    "blockedBy",
+    "relatedTo",
+    "duplicateOf",
+    "removeBlocks",
+    "removeBlockedBy",
+    "removeRelatedTo",
   ],
 } as const;
 
@@ -456,7 +479,10 @@ function jsonRpcResponse(id: unknown, result: unknown): Response {
   });
 }
 
-function linearMcpFetch(issue: ReturnType<typeof linearIssue>): typeof fetch {
+function linearMcpFetch(
+  issue: ReturnType<typeof linearIssue>,
+  comments: unknown = { comments: [], hasNextPage: false },
+): typeof fetch {
   const fetcher = mock(async (url: string | URL | Request, init?: RequestInit) => {
     if (String(url) === "https://api.linear.app/graphql") {
       return new Response(
@@ -500,7 +526,9 @@ function linearMcpFetch(issue: ReturnType<typeof linearIssue>): typeof fetch {
             }
           : request.params.name === "get_issue"
             ? issue
-            : {};
+            : request.params.name === "list_comments"
+              ? comments
+              : {};
 
       return jsonRpcResponse(request.id, {
         content: [{ type: "text", text: JSON.stringify(value) }],
@@ -540,6 +568,52 @@ describe("issue write workflow", () => {
       await expect(
         applyIssueOperation(preview.token, { cwd: repository, fetcher: applyFetcher }),
       ).rejects.toMatchObject({ code: "ISSUE_OUTSIDE_TARGET" });
+    });
+  });
+
+  test("validates subissue parents during prepare and again during apply", async () => {
+    await withLinearFixture(async (repository) => {
+      const preview = await prepareIssueOperation(
+        { operation: "create", input: { title: "Child", parent: "ENG-1" } },
+        { cwd: repository, fetcher: linearMcpFetch(linearIssue()) },
+      );
+
+      await expect(
+        applyIssueOperation(preview.token, {
+          cwd: repository,
+          fetcher: linearMcpFetch(linearIssue("project-1")),
+        }),
+      ).rejects.toMatchObject({ code: "ISSUE_OUTSIDE_TARGET" });
+    });
+  });
+
+  test("rejects comment edits when the comment is not owned by the target issue", async () => {
+    await withLinearFixture(async (repository) => {
+      await expect(
+        prepareIssueOperation(
+          {
+            operation: "comment",
+            identifier: "linear:ENG-1",
+            body: "Edited",
+            commentId: "comment-from-another-issue",
+          },
+          { cwd: repository, fetcher: linearMcpFetch(linearIssue()) },
+        ),
+      ).rejects.toMatchObject({ code: "ISSUE_COMMENT_OUTSIDE_TARGET" });
+    });
+  });
+
+  test("keeps SLA fields outside the provider-neutral Linear write surface", async () => {
+    await withLinearFixture(async (repository) => {
+      await expect(
+        prepareIssueOperation(
+          {
+            operation: "create",
+            input: { title: "Example", slaBreachesAt: "2026-08-01T00:00:00Z" },
+          },
+          { cwd: repository, fetcher: linearMcpFetch(linearIssue()) },
+        ),
+      ).rejects.toMatchObject({ code: "FIELD_UNSUPPORTED" });
     });
   });
 

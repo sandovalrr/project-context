@@ -7,14 +7,25 @@ const REQUEST_TIMEOUT_MS = 20_000;
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 
 const linearMcpToolProperties = {
-  get_issue: ["id"],
+  get_issue: ["id", "includeRelations"],
   get_user: ["query"],
   list_comments: ["issueId", "limit", "cursor", "orderBy"],
+  list_cycles: ["teamId", "type"],
   list_issue_labels: ["team", "name", "limit", "cursor"],
   list_issue_statuses: ["team"],
-  list_issues: ["team", "project", "query", "limit", "cursor", "orderBy", "includeArchived"],
+  list_issues: [
+    "team",
+    "project",
+    "query",
+    "limit",
+    "cursor",
+    "orderBy",
+    "includeArchived",
+    "parentId",
+  ],
+  list_milestones: ["project"],
   list_users: ["team", "query", "limit", "cursor"],
-  save_comment: ["issueId", "body"],
+  save_comment: ["id", "issueId", "parentId", "body"],
   save_issue: [
     "id",
     "title",
@@ -25,6 +36,18 @@ const linearMcpToolProperties = {
     "assignee",
     "priority",
     "labels",
+    "cycle",
+    "milestone",
+    "dueDate",
+    "parentId",
+    "estimate",
+    "blocks",
+    "blockedBy",
+    "relatedTo",
+    "duplicateOf",
+    "removeBlocks",
+    "removeBlockedBy",
+    "removeRelatedTo",
   ],
 } as const;
 
@@ -142,6 +165,18 @@ function assertToolContract(tools: ToolDefinition[]): void {
   }
 }
 
+function assertToolInput(tool: LinearMcpToolName, input: Record<string, unknown>): void {
+  const allowedProperties: readonly string[] = linearMcpToolProperties[tool];
+  const unexpected = Object.keys(input).filter((property) => !allowedProperties.includes(property));
+
+  if (unexpected.length === 0) return;
+
+  throw new ProjectContextError(
+    "LINEAR_MCP_INPUT_UNSAFE",
+    `Linear MCP input contains a non-allowlisted property for ${tool}`,
+  );
+}
+
 function parsedToolContent(result: unknown): unknown {
   if (!result || typeof result !== "object") {
     throw new ProjectContextError(
@@ -204,8 +239,11 @@ export class HostedLinearMcpConnector implements LinearMcpConnector {
       assertToolContract(tools.tools);
 
       return await work({
-        call: async (tool, input) =>
-          parsedToolContent(await client.callTool({ name: tool, arguments: input })),
+        call: async (tool, input) => {
+          assertToolInput(tool, input);
+
+          return parsedToolContent(await client.callTool({ name: tool, arguments: input }));
+        },
       });
     } catch (error) {
       if (error instanceof ProjectContextError) throw error;

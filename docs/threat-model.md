@@ -79,11 +79,12 @@ creation from silently depending on list order or escaping the read boundary.
 
 The hosted Linear MCP advertises a much wider tool catalog than project-context
 needs. The adapter statically allowlists issue read/write, comment, user, label,
-and status tools, validates their input interfaces at connection time, and
-normalizes their output through local schemas. Missing tools, input schema
-drift, malformed output, and out-of-target results fail closed. Attachments,
-deletes, projects, initiatives, releases, diffs, reviews, and administrative
-tools are not reachable through project-context.
+status, cycle, and milestone tools, validates their input interfaces at
+connection time, rejects non-allowlisted input properties before transport,
+and normalizes their output through local schemas. Missing tools, input schema
+drift, malformed output, and out-of-target results fail closed. SLA fields,
+attachments, deletes, projects, initiatives, releases, diffs, reviews,
+delegation, and administrative tools are not reachable through project-context.
 
 GitHub Project targets use stable GraphQL node IDs for both the Project and its
 Status field. Direct reads and mutations verify Project membership; Project

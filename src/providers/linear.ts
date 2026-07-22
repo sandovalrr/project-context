@@ -12,12 +12,16 @@ import type {
   AssignableUser,
   IssueComment,
   IssueCommentListResult,
+  IssueCommentWriteOptions,
   IssueCreateInput,
+  IssueGetOptions,
   IssueListOptions,
   IssueListResult,
   IssueOptionField,
   IssueOptionListResult,
   IssueProviderAdapter,
+  IssueReference,
+  IssueRelations,
   IssueSnapshot,
   IssueUpdateInput,
   ProviderIdentity,
@@ -46,6 +50,18 @@ const linearMcpIssueSchema = z
     createdAt: z.string(),
     updatedAt: z.string(),
     dueDate: z.string().nullable().optional(),
+    estimate: z.number().nullable().optional(),
+    archivedAt: z.string().nullable().optional(),
+    cycle: z
+      .object({ id: z.string().min(1), name: z.string().optional(), number: z.number().optional() })
+      .passthrough()
+      .nullable()
+      .optional(),
+    milestone: z
+      .object({ id: z.string().min(1), name: z.string().min(1) })
+      .passthrough()
+      .nullable()
+      .optional(),
     status: z.string(),
     labels: z.array(z.string()).optional(),
     assignee: z.string().nullable().optional(),
@@ -54,6 +70,31 @@ const linearMcpIssueSchema = z
     createdById: z.string().nullable().optional(),
     projectId: z.string().nullable().optional(),
     teamId: z.string().min(1),
+    relations: z
+      .object({
+        blocks: z
+          .array(
+            z.object({ id: z.string().min(1), identifier: z.string().optional() }).passthrough(),
+          )
+          .optional(),
+        blockedBy: z
+          .array(
+            z.object({ id: z.string().min(1), identifier: z.string().optional() }).passthrough(),
+          )
+          .optional(),
+        relatedTo: z
+          .array(
+            z.object({ id: z.string().min(1), identifier: z.string().optional() }).passthrough(),
+          )
+          .optional(),
+        duplicateOf: z
+          .object({ id: z.string().min(1), identifier: z.string().optional() })
+          .passthrough()
+          .nullable()
+          .optional(),
+      })
+      .passthrough()
+      .optional(),
   })
   .passthrough();
 const linearMcpIssuePageSchema = z
@@ -113,10 +154,25 @@ const linearMcpCommentPageSchema = z
   })
   .passthrough();
 const linearMcpSavedIssueSchema = z.object({ id: z.string().min(1) }).passthrough();
+const linearMcpCycleSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().optional(),
+    number: z.number().optional(),
+  })
+  .passthrough();
+const linearMcpCyclesSchema = z.array(linearMcpCycleSchema);
+const linearMcpMilestoneSchema = z
+  .object({ id: z.string().min(1), name: z.string().min(1) })
+  .passthrough();
+const linearMcpMilestonesSchema = z
+  .object({ milestones: z.array(linearMcpMilestoneSchema) })
+  .passthrough();
 
 type LinearMcpIssue = z.infer<typeof linearMcpIssueSchema>;
 type LinearMcpUser = z.infer<typeof linearMcpUserSchema>;
 type LinearMcpLabel = z.infer<typeof linearMcpLabelSchema>;
+type LinearMcpRelation = NonNullable<LinearMcpIssue["relations"]>;
 
 interface CollectedIssues {
   issues: LinearMcpIssue[];
@@ -221,7 +277,16 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
     return result.data.organization;
   }
 
-  #snapshot(issue: LinearMcpIssue): IssueSnapshot {
+  #reference(issue: LinearMcpIssue): IssueReference {
+    return {
+      id: issue.id,
+      identifier: issue.id,
+      title: issue.title,
+      url: issue.url,
+    };
+  }
+
+  #snapshot(issue: LinearMcpIssue, relations: IssueRelations | null = null): IssueSnapshot {
     return {
       provider: this.type,
       id: issue.id,
@@ -255,6 +320,18 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
       issueType: null,
       createdAt: issue.createdAt,
       dueDate: issue.dueDate ?? null,
+      estimate: issue.estimate ?? null,
+      cycle: issue.cycle
+        ? {
+            value: issue.cycle.id,
+            label: issue.cycle.name ?? `Cycle ${issue.cycle.number ?? issue.cycle.id}`,
+          }
+        : null,
+      milestone: issue.milestone
+        ? { value: issue.milestone.id, label: issue.milestone.name }
+        : null,
+      archivedAt: issue.archivedAt ?? null,
+      relations,
       url: issue.url,
       updatedAt: issue.updatedAt,
       version: versionOf(issue.updatedAt, issue.id),
@@ -327,6 +404,8 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
     matches: StatusMatch[],
     projectId: string | undefined,
     query: string | undefined,
+    includeArchived: boolean,
+    parent: string | undefined,
     cursor?: string,
     collected: LinearMcpIssue[] = [],
     pages = 0,
@@ -335,9 +414,10 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
       team: this.target.team.id,
       limit: pageSize(desired),
       orderBy: "updatedAt",
-      includeArchived: false,
+      includeArchived,
       ...(projectId ? { project: projectId } : {}),
       ...(query ? { query } : {}),
+      ...(parent ? { parentId: parent } : {}),
       ...(cursor ? { cursor } : {}),
     });
     const page = parseLinearMcpOutput(linearMcpIssuePageSchema, value);
@@ -358,6 +438,8 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
       matches,
       projectId,
       query,
+      includeArchived,
+      parent,
       page.cursor,
       combined,
       pages + 1,
@@ -369,10 +451,20 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
     limit: number,
     matches: StatusMatch[],
     query?: string,
+    includeArchived = false,
+    parent?: string,
   ): Promise<CollectedIssues> {
     const streams = await Promise.all(
       this.#projectStreams().map((projectId) =>
-        this.#collectIssueStream(session, limit + 1, matches, projectId, query),
+        this.#collectIssueStream(
+          session,
+          limit + 1,
+          matches,
+          projectId,
+          query,
+          includeArchived,
+          parent,
+        ),
       ),
     );
     const unique = new Map(
@@ -452,6 +544,78 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
     return this.#collectLabels(session, limit, query, page.cursor, combined, pages + 1);
   }
 
+  async #cycleOptions(session: LinearMcpSession): Promise<IssueOptionListResult> {
+    const cycles = parseLinearMcpOutput(
+      linearMcpCyclesSchema,
+      await session.call("list_cycles", { teamId: this.target.team.id }),
+    );
+
+    return {
+      options: cycles.map((cycle) => ({
+        value: cycle.id,
+        label: cycle.name ?? `Cycle ${cycle.number ?? cycle.id}`,
+      })),
+      truncated: false,
+    };
+  }
+
+  async #milestoneOptions(
+    session: LinearMcpSession,
+    projectId = this.#creationProject(),
+  ): Promise<IssueOptionListResult> {
+    if (!projectId) return { options: [], truncated: false };
+
+    const result = parseLinearMcpOutput(
+      linearMcpMilestonesSchema,
+      await session.call("list_milestones", { project: projectId }),
+    );
+
+    return {
+      options: result.milestones.map((milestone) => ({
+        value: milestone.id,
+        label: milestone.name,
+      })),
+      truncated: false,
+    };
+  }
+
+  #matchingOption(options: IssueOptionListResult, value: string, field: string): string {
+    const matches = options.options.filter(
+      (option) => String(option.value) === value || sameName(option.label, value),
+    );
+    if (matches.length !== 1) {
+      throw new ProjectContextError(
+        "LINEAR_OPTION_AMBIGUOUS",
+        `Linear ${field} ${value} resolved to ${matches.length} target-scoped options`,
+      );
+    }
+
+    return String(matches[0]?.value);
+  }
+
+  async #resolvedCycle(session: LinearMcpSession, value: string): Promise<string> {
+    return this.#matchingOption(await this.#cycleOptions(session), value, "cycle");
+  }
+
+  async #resolvedMilestone(
+    session: LinearMcpSession,
+    value: string,
+    projectId: string | undefined,
+  ): Promise<string> {
+    if (!projectId) {
+      throw new ProjectContextError(
+        "FIELD_UNSUPPORTED",
+        "Linear milestones require an exact configured project target",
+      );
+    }
+
+    return this.#matchingOption(
+      await this.#milestoneOptions(session, projectId),
+      value,
+      "milestone",
+    );
+  }
+
   #assignableUser(user: LinearMcpUser): AssignableUser {
     return {
       provider: this.type,
@@ -518,9 +682,75 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
     return resolutions;
   }
 
+  async #resolvedIssueIds(
+    session: LinearMcpSession,
+    identifiers: string[],
+    sourceIdentifier?: string,
+  ): Promise<string[]> {
+    if (sourceIdentifier && identifiers.some((identifier) => identifier === sourceIdentifier)) {
+      throw new ProjectContextError(
+        "ISSUE_RELATION_INVALID",
+        "An issue cannot have a relationship with itself",
+      );
+    }
+
+    const uniqueIdentifiers = [...new Set(identifiers)];
+    const issues = await Promise.all(
+      uniqueIdentifiers.map((identifier) => this.#get(session, identifier)),
+    );
+    if (sourceIdentifier && issues.some(({ id }) => id === sourceIdentifier)) {
+      throw new ProjectContextError(
+        "ISSUE_RELATION_INVALID",
+        "An issue cannot have a relationship with itself",
+      );
+    }
+
+    return issues.map(({ id }) => id);
+  }
+
+  async #resolvedRelationFields(
+    session: LinearMcpSession,
+    input: IssueUpdateInput | IssueCreateInput,
+    sourceIdentifier?: string,
+  ): Promise<Record<string, unknown>> {
+    const lists = [
+      ["blocks", input.blocks],
+      ["blockedBy", input.blockedBy],
+      ["relatedTo", input.relatedTo],
+      ["removeBlocks", "removeBlocks" in input ? input.removeBlocks : undefined],
+      ["removeBlockedBy", "removeBlockedBy" in input ? input.removeBlockedBy : undefined],
+      ["removeRelatedTo", "removeRelatedTo" in input ? input.removeRelatedTo : undefined],
+    ] as const;
+    const resolvedLists = await Promise.all(
+      lists.map(async ([field, identifiers]) =>
+        identifiers === undefined
+          ? undefined
+          : [field, await this.#resolvedIssueIds(session, identifiers, sourceIdentifier)],
+      ),
+    );
+    const parent = input.parent;
+    const duplicateOf = input.duplicateOf;
+    const resolvedParent =
+      parent === undefined || parent === null
+        ? parent
+        : (await this.#resolvedIssueIds(session, [parent], sourceIdentifier))[0];
+    const resolvedDuplicate =
+      duplicateOf === undefined || duplicateOf === null
+        ? duplicateOf
+        : (await this.#resolvedIssueIds(session, [duplicateOf], sourceIdentifier))[0];
+
+    return {
+      ...Object.fromEntries(resolvedLists.filter((entry) => entry !== undefined)),
+      ...(parent === undefined ? {} : { parentId: resolvedParent }),
+      ...(duplicateOf === undefined ? {} : { duplicateOf: resolvedDuplicate }),
+    };
+  }
+
   async #input(
     session: LinearMcpSession,
     input: IssueUpdateInput | IssueCreateInput,
+    projectId: string | undefined,
+    sourceIdentifier?: string,
   ): Promise<Record<string, unknown>> {
     if ("issueType" in input && input.issueType !== undefined) {
       throw new ProjectContextError(
@@ -528,6 +758,16 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
         "Linear does not support the generic issueType field",
       );
     }
+
+    const relationFields = await this.#resolvedRelationFields(session, input, sourceIdentifier);
+    const cycle =
+      input.cycle === undefined || input.cycle === null
+        ? input.cycle
+        : await this.#resolvedCycle(session, input.cycle);
+    const milestone =
+      input.milestone === undefined
+        ? undefined
+        : await this.#resolvedMilestone(session, input.milestone, projectId);
 
     return {
       ...(input.title === undefined ? {} : { title: input.title }),
@@ -537,17 +777,56 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
       ...(input.labels === undefined
         ? {}
         : { labels: await this.#resolvedLabels(session, input.labels) }),
+      ...(input.dueDate === undefined ? {} : { dueDate: input.dueDate }),
+      ...(input.estimate === undefined ? {} : { estimate: input.estimate }),
+      ...(input.cycle === undefined ? {} : { cycle }),
+      ...(input.milestone === undefined ? {} : { milestone }),
+      ...relationFields,
     };
   }
 
-  async #get(session: LinearMcpSession, identifier: string): Promise<LinearMcpIssue> {
+  async #get(
+    session: LinearMcpSession,
+    identifier: string,
+    includeRelations = false,
+  ): Promise<LinearMcpIssue> {
     const issue = parseLinearMcpOutput(
       linearMcpIssueSchema,
-      await session.call("get_issue", { id: identifier }),
+      await session.call("get_issue", {
+        id: identifier,
+        ...(includeRelations ? { includeRelations: true } : {}),
+      }),
     );
     this.#assertTarget(issue);
 
     return issue;
+  }
+
+  async #relationReference(
+    session: LinearMcpSession,
+    relation: { id: string; identifier?: string | undefined },
+  ): Promise<IssueReference> {
+    return this.#reference(await this.#get(session, relation.identifier ?? relation.id));
+  }
+
+  async #relations(
+    session: LinearMcpSession,
+    relations: LinearMcpRelation | undefined,
+  ): Promise<IssueRelations> {
+    const blocks = await Promise.all(
+      (relations?.blocks ?? []).map((relation) => this.#relationReference(session, relation)),
+    );
+    const blockedBy = await Promise.all(
+      (relations?.blockedBy ?? []).map((relation) => this.#relationReference(session, relation)),
+    );
+    const relatedTo = await Promise.all(
+      (relations?.relatedTo ?? []).map((relation) => this.#relationReference(session, relation)),
+    );
+    const duplicateOf = relations?.duplicateOf
+      ? await this.#relationReference(session, relations.duplicateOf)
+      : null;
+
+    return { blocks, blockedBy, relatedTo, duplicateOf };
   }
 
   async identity(): Promise<ProviderIdentity> {
@@ -570,7 +849,15 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
 
   async list(options: IssueListOptions = {}): Promise<IssueListResult> {
     return this.connector.withSession(async (session) => {
-      const result = await this.#collectIssues(session, options.limit ?? 30, options.matches ?? []);
+      if (options.parent) await this.#get(session, options.parent);
+      const result = await this.#collectIssues(
+        session,
+        options.limit ?? 30,
+        options.matches ?? [],
+        undefined,
+        options.includeArchived ?? false,
+        options.parent,
+      );
 
       return {
         issues: result.issues.map((issue) => this.#targetedSnapshot(issue)),
@@ -601,6 +888,16 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
     limit = 30,
   ): Promise<IssueOptionListResult> {
     if (field === "priority") return filterIssueOptions(linearPriorities, query, limit);
+    if (field === "cycle" || field === "milestone") {
+      return this.connector.withSession(async (session) => {
+        const catalog =
+          field === "cycle"
+            ? await this.#cycleOptions(session)
+            : await this.#milestoneOptions(session);
+
+        return filterIssueOptions(catalog.options, query, limit);
+      });
+    }
     if (field !== "labels") {
       throw new ProjectContextError(
         "ISSUE_OPTION_FIELD_UNSUPPORTED",
@@ -623,7 +920,14 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
 
   async capabilities(): Promise<ProviderIssueCapabilities> {
     return this.connector.withSession(async (session) => {
-      const result = await this.#collectLabels(session, 100);
+      const [result, cycles, milestones] = await Promise.all([
+        this.#collectLabels(session, 100),
+        this.#cycleOptions(session),
+        this.#milestoneOptions(session),
+      ]);
+      const milestoneOperations = this.#creationProject()
+        ? (["create", "update"] as const)
+        : ([] as const);
 
       return {
         fields: [
@@ -648,15 +952,61 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
             discoveryTool: "search_issue_options",
           }),
           issueFieldCapability("issueType", []),
+          issueFieldCapability("dueDate", ["create", "update"], {
+            clearable: true,
+            acceptsCustomValues: true,
+          }),
+          issueFieldCapability("estimate", ["create", "update"], {
+            clearable: true,
+            acceptsCustomValues: true,
+          }),
+          issueFieldCapability("cycle", ["create", "update"], {
+            clearable: true,
+            options: cycles.options,
+            discoveryTool: "search_issue_options",
+          }),
+          issueFieldCapability("milestone", [...milestoneOperations], {
+            options: milestones.options,
+            discoveryTool: "search_issue_options",
+          }),
+          issueFieldCapability("parent", ["create", "update"], {
+            clearable: true,
+            discoveryTool: "get_issue",
+          }),
+          issueFieldCapability("blocks", ["create", "update"], {
+            discoveryTool: "get_issue",
+          }),
+          issueFieldCapability("blockedBy", ["create", "update"], {
+            discoveryTool: "get_issue",
+          }),
+          issueFieldCapability("relatedTo", ["create", "update"], {
+            discoveryTool: "get_issue",
+          }),
+          issueFieldCapability("duplicateOf", ["create", "update"], {
+            clearable: true,
+            discoveryTool: "get_issue",
+          }),
+          issueFieldCapability("removeBlocks", ["update"], { discoveryTool: "get_issue" }),
+          issueFieldCapability("removeBlockedBy", ["update"], {
+            discoveryTool: "get_issue",
+          }),
+          issueFieldCapability("removeRelatedTo", ["update"], {
+            discoveryTool: "get_issue",
+          }),
         ],
       };
     });
   }
 
-  async get(identifier: string): Promise<IssueSnapshot> {
-    return this.connector.withSession(async (session) =>
-      this.#snapshot(await this.#get(session, identifier)),
-    );
+  async get(identifier: string, options: IssueGetOptions = {}): Promise<IssueSnapshot> {
+    return this.connector.withSession(async (session) => {
+      const issue = await this.#get(session, identifier, options.includeRelations ?? false);
+      const relations = options.includeRelations
+        ? await this.#relations(session, issue.relations)
+        : null;
+
+      return this.#snapshot(issue, relations);
+    });
   }
 
   async listComments(identifier: string, limit = 30): Promise<IssueCommentListResult> {
@@ -697,15 +1047,77 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
     });
   }
 
+  async #collectCommentIds(
+    session: LinearMcpSession,
+    identifier: string,
+    cursor?: string,
+    collected: string[] = [],
+    pages = 0,
+  ): Promise<string[]> {
+    const value = await session.call("list_comments", {
+      issueId: identifier,
+      limit: MCP_PAGE_SIZE,
+      orderBy: "updatedAt",
+      ...(cursor ? { cursor } : {}),
+    });
+    const page = parseLinearMcpOutput(linearMcpCommentPageSchema, value);
+    const combined = [...collected, ...page.comments.map(({ id }) => id)];
+
+    if (!page.hasNextPage) return combined;
+    if (!page.cursor || pages + 1 >= MAX_MCP_PAGES) {
+      throw new ProjectContextError(
+        "LINEAR_COMMENT_SCOPE_UNVERIFIABLE",
+        "Linear comment ownership could not be verified within the bounded page limit",
+      );
+    }
+
+    return this.#collectCommentIds(session, identifier, page.cursor, combined, pages + 1);
+  }
+
+  async #assertCommentTarget(
+    session: LinearMcpSession,
+    identifier: string,
+    options: IssueCommentWriteOptions,
+  ): Promise<void> {
+    if (options.commentId && options.parentCommentId) {
+      throw new ProjectContextError(
+        "ISSUE_COMMENT_MODE_INVALID",
+        "A comment write cannot edit and reply at the same time",
+      );
+    }
+    const referencedComment = options.commentId ?? options.parentCommentId;
+    if (!referencedComment) return;
+
+    const commentIds = await this.#collectCommentIds(session, identifier);
+    if (commentIds.includes(referencedComment)) return;
+
+    throw new ProjectContextError(
+      "ISSUE_COMMENT_OUTSIDE_TARGET",
+      "Linear comment does not belong to the target issue",
+    );
+  }
+
+  async validateCommentTarget(
+    identifier: string,
+    options: IssueCommentWriteOptions,
+  ): Promise<void> {
+    await this.connector.withSession(async (session) => {
+      await this.#get(session, identifier);
+      await this.#assertCommentTarget(session, identifier, options);
+      await this.#get(session, identifier);
+    });
+  }
+
   async create(input: IssueCreateInput): Promise<IssueSnapshot> {
     return this.connector.withSession(async (session) => {
-      const fields = await this.#input(session, input);
+      const projectId = this.#creationProject();
+      const fields = await this.#input(session, input, projectId);
       const created = parseLinearMcpOutput(
         linearMcpSavedIssueSchema,
         await session.call("save_issue", {
           ...fields,
           team: this.target.team.id,
-          ...(this.#creationProject() ? { project: this.#creationProject() } : {}),
+          ...(projectId ? { project: projectId } : {}),
         }),
       );
 
@@ -715,18 +1127,28 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
 
   async update(identifier: string, input: IssueUpdateInput): Promise<IssueSnapshot> {
     return this.connector.withSession(async (session) => {
-      await this.#get(session, identifier);
-      const fields = await this.#input(session, input);
+      const current = await this.#get(session, identifier);
+      const fields = await this.#input(session, input, current.projectId ?? undefined, identifier);
       await session.call("save_issue", { id: identifier, ...fields });
 
       return this.#snapshot(await this.#get(session, identifier));
     });
   }
 
-  async comment(identifier: string, body: string): Promise<void> {
+  async comment(
+    identifier: string,
+    body: string,
+    options: IssueCommentWriteOptions = {},
+  ): Promise<void> {
     await this.connector.withSession(async (session) => {
       await this.#get(session, identifier);
-      await session.call("save_comment", { issueId: identifier, body });
+      await this.#assertCommentTarget(session, identifier, options);
+      await session.call("save_comment", {
+        ...(options.commentId ? { id: options.commentId } : { issueId: identifier }),
+        ...(options.parentCommentId ? { parentId: options.parentCommentId } : {}),
+        body,
+      });
+      await this.#get(session, identifier);
     });
   }
 

@@ -4,17 +4,17 @@ Use these commands only when the provider-neutral MCP server is unavailable.
 
 ```text
 project-context resolve --cwd <path>
-project-context issue list [--status <canonical-status> ...] [--provider <alias> | --all]
+project-context issue list [--status <canonical-status> ...] [--parent <reference>] [--include-archived] [--provider <alias> | --all]
 project-context issue search <query> [--provider <alias> | --all]
 project-context issue capabilities [--provider <alias> | --all]
-project-context issue option search <labels|priority|issueType> <query> [--provider <alias> | --all]
+project-context issue option search <labels|priority|issueType|cycle|milestone> <query> [--provider <alias> | --all]
 project-context issue user list [--provider <alias> | --all]
 project-context issue user search <query> [--provider <alias> | --all]
-project-context issue get <reference> [--provider <alias>]
+project-context issue get <reference> [--include-relations] [--provider <alias>]
 project-context issue comment list <reference> [--provider <alias>] [--limit <1-100>]
-project-context issue prepare create --title <title> [--description <text>] [--preset <name>]
+project-context issue prepare create --title <title> [--description <text>] [--parent <reference>] [--preset <name>]
 project-context issue prepare update --ref <reference> --title <title>
-project-context issue prepare comment --ref <reference> --body <text>
+project-context issue prepare comment --ref <reference> --body <text> [--comment-id <id> | --parent-comment-id <id>]
 project-context issue prepare transition --ref <reference> --status <canonical-status>
 project-context issue prepare close|reopen --ref <reference>
 project-context issue prepare link --ref <reference> --url <issue-url>

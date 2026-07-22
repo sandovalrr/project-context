@@ -14,20 +14,22 @@ call only this fixed tool set:
 | Linear MCP tool | Project-context use |
 | --- | --- |
 | `get_issue` | Target-scoped reads and mutation revalidation |
-| `list_issues` | Lists and title/description searches |
-| `save_issue` | Create, update, and workflow transitions |
+| `list_issues` | Lists, searches, archived opt-in, and direct subissue filtering |
+| `save_issue` | Create, update, workflow, planning fields, subissues, and relationships |
 | `list_comments` | Comment reads after issue target validation |
-| `save_comment` | Comments and provider-neutral related links |
+| `save_comment` | Comments, replies, edits, and provider-neutral related links |
 | `get_user` | Authenticated principal identity |
 | `list_users` | Target-team assignee discovery |
 | `list_issue_labels` | Label validation and capabilities |
 | `list_issue_statuses` | Exact workflow transition resolution |
+| `list_cycles` | Target-team cycle validation and discovery |
+| `list_milestones` | Target-project milestone validation and discovery |
 
-Attachments, deletes, projects, initiatives, releases, diffs, reviews,
-documents, milestones, agent skills, and administrative tools are deliberately
-excluded. Adding an upstream capability requires a provider-neutral operation,
-local target rules, preview/apply behavior for writes, response schemas, tests,
-and an explicit allowlist change.
+SLA fields, attachments, deletes, projects, initiatives, releases, diffs,
+reviews, documents, customer needs, delegation, agent skills, and
+administrative tools are deliberately excluded. Adding an upstream capability
+requires a provider-neutral operation, local target rules, preview/apply
+behavior for writes, response schemas, tests, and an explicit allowlist change.
 
 ## Security controls
 
@@ -36,10 +38,13 @@ and an explicit allowlist change.
 - MCP transport calls are not retried because the HTTP layer cannot infer
   whether a tool call is a read or a write.
 - Every connection verifies the required tool names and input properties.
+- Every tool call rejects input properties outside its local allowlist before
+  transport. An upstream field being available does not make it reachable.
 - Tool errors are redacted and JSON output is validated locally.
 - Direct reads and mutations revalidate the configured team and project
-  policy. Comment reads validate both before and after retrieving comment
-  content.
+  policy. Related issues, subissue parents, and relationship targets are also
+  validated. Comment reads, replies, and edits validate both the issue and
+  comment ownership before returning or changing content.
 - The normal encrypted preview/apply token, identity check, version check, and
   metadata-only audit remain authoritative for writes.
 
@@ -60,3 +65,9 @@ pages through the configured team and drops projected issues before returning
 content. Collection stops after ten pages of at most 250 items. If that bound
 or the requested result limit prevents complete collection, operations that
 support it return `truncated: true`.
+
+`include_archived` is false unless explicitly requested. A parent filter first
+validates the parent through the configured target, then passes its identifier
+to Linear's direct-subissue filter. Relation-expanded reads fetch every
+referenced issue separately and return the relation set only after all of them
+pass the same target policy.

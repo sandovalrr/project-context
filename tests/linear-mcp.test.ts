@@ -2,14 +2,25 @@ import { describe, expect, mock, test } from "bun:test";
 import { HostedLinearMcpConnector } from "../src/providers/linear-mcp.ts";
 
 const toolProperties = {
-  get_issue: ["id"],
+  get_issue: ["id", "includeRelations"],
   get_user: ["query"],
   list_comments: ["issueId", "limit", "cursor", "orderBy"],
+  list_cycles: ["teamId", "type"],
   list_issue_labels: ["team", "name", "limit", "cursor"],
   list_issue_statuses: ["team"],
-  list_issues: ["team", "project", "query", "limit", "cursor", "orderBy", "includeArchived"],
+  list_issues: [
+    "team",
+    "project",
+    "query",
+    "limit",
+    "cursor",
+    "orderBy",
+    "includeArchived",
+    "parentId",
+  ],
+  list_milestones: ["project"],
   list_users: ["team", "query", "limit", "cursor"],
-  save_comment: ["issueId", "body"],
+  save_comment: ["id", "issueId", "parentId", "body"],
   save_issue: [
     "id",
     "title",
@@ -20,6 +31,18 @@ const toolProperties = {
     "assignee",
     "priority",
     "labels",
+    "cycle",
+    "milestone",
+    "dueDate",
+    "parentId",
+    "estimate",
+    "blocks",
+    "blockedBy",
+    "relatedTo",
+    "duplicateOf",
+    "removeBlocks",
+    "removeBlockedBy",
+    "removeRelatedTo",
   ],
 } as const;
 
@@ -113,6 +136,24 @@ describe("hosted Linear MCP connector", () => {
       expect(error).toMatchObject({ code: "LINEAR_MCP_TOOL_ERROR" });
       expect(String(error)).not.toContain("secret-value");
     }
+  });
+
+  test("rejects non-allowlisted tool inputs such as SLA fields before transport", async () => {
+    const fetcher = protocolFetch();
+    const connector = new HostedLinearMcpConnector("secret", fetcher);
+
+    await expect(
+      connector.withSession((session) =>
+        session.call("save_issue", {
+          id: "ENG-1",
+          slaBreachesAt: "2026-08-01T00:00:00Z",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "LINEAR_MCP_INPUT_UNSAFE" });
+    const calls = (fetcher as unknown as ReturnType<typeof mock>).mock.calls;
+    expect(
+      calls.filter(([, init]) => String(init?.body ?? "").includes('"method":"tools/call"')),
+    ).toHaveLength(0);
   });
 
   test("rejects declared responses above the provider response limit", async () => {
