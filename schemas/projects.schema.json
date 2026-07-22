@@ -164,7 +164,7 @@
               "properties": {
                 "team": { "$ref": "#/$defs/identityRef" },
                 "project": {
-                  "oneOf": [{ "$ref": "#/$defs/identityRef" }, { "const": "none" }]
+                  "oneOf": [{ "$ref": "#/$defs/identityRef" }, { "enum": ["none", "any"] }]
                 }
               }
             },

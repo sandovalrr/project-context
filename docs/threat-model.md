@@ -67,6 +67,11 @@ Ambiguous remotes, aliases, identifier patterns, client roots, and provider
 selection fail closed. Explicit URLs or provider-qualified references take
 precedence only when that provider is configured for the repository.
 
+Linear `project: any` is an explicit widening from one project to the complete
+configured team. The adapter still adds the team filter to list/search requests
+and validates the returned team on direct reads used during mutation prepare
+and apply.
+
 GitHub Project targets use stable GraphQL node IDs for both the Project and its
 Status field. Direct reads and mutations verify Project membership; Project
 lists filter content type and repository. Names are never used as the security

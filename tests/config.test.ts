@@ -74,6 +74,17 @@ describe("configuration", () => {
     expect(() => validateRegistryReferences(projects, credentials)).toThrow("type does not match");
   });
 
+  test("accepts an explicit Linear team-wide project target", async () => {
+    const projects = await loadProjectsConfig("examples/projects.example.yaml");
+    const linear =
+      projects.projects["github.com/example/example-repository"]?.issues.providers.linear;
+    if (linear?.type !== "linear") throw new Error("test fixture missing Linear provider");
+
+    linear.target.project = "any";
+
+    expect(() => validateProjectsConfigValue(projects)).not.toThrow();
+  });
+
   test("accepts a GitHub Projects v2 target with a stable Status field identity", async () => {
     const projects = await loadProjectsConfig("examples/projects.example.yaml");
     const github =

@@ -42,6 +42,10 @@ const linearTarget: LinearProjectProvider["target"] = {
   team: { id: "team-1", name: "Engineering" },
   project: "none",
 };
+const linearTeamTarget: LinearProjectProvider["target"] = {
+  team: { id: "team-1", name: "Engineering" },
+  project: "any",
+};
 
 function linearIssue(teamId: string, projectId?: string) {
   return {
@@ -651,6 +655,26 @@ describe("Linear adapter", () => {
     await expect(adapter.get("ENG-1")).rejects.toMatchObject({ code: "ISSUE_OUTSIDE_TARGET" });
   });
 
+  test("accepts projected and unprojected issues in a team-wide target", async () => {
+    const { fetcher } = mockFetch([
+      { data: { issue: linearIssue("team-1", "project-1") } },
+      { data: { issue: linearIssue("team-1") } },
+      { data: { issue: linearIssue("team-2", "project-1") } },
+    ]);
+    const adapter = new LinearIssuesAdapter(
+      linearProfile,
+      linearTeamTarget,
+      { token: "secret" },
+      fetcher,
+    );
+
+    expect((await adapter.get("ENG-1")).identifier).toBe("ENG-1");
+    expect((await adapter.get("ENG-2")).identifier).toBe("ENG-1");
+    await expect(adapter.get("OTHER-1")).rejects.toMatchObject({
+      code: "ISSUE_OUTSIDE_TARGET",
+    });
+  });
+
   test("rejects an issue in a different team", async () => {
     const { fetcher } = mockFetch([{ data: { issue: linearIssue("team-2") } }]);
     const adapter = new LinearIssuesAdapter(
@@ -698,6 +722,46 @@ describe("Linear adapter", () => {
         ],
       },
     });
+  });
+
+  test("omits the project filter when searching a team-wide target", async () => {
+    const { fetcher, requests } = mockFetch([
+      { data: { issues: { nodes: [linearIssue("team-1", "project-1")] } } },
+    ]);
+    const adapter = new LinearIssuesAdapter(
+      linearProfile,
+      linearTeamTarget,
+      { token: "secret" },
+      fetcher,
+    );
+
+    expect((await adapter.search("targeted", 1))[0]?.identifier).toBe("ENG-1");
+    const body = JSON.parse(String(requests[0]?.init?.body));
+    expect(body.variables.filter).toMatchObject({ team: { id: { eq: "team-1" } } });
+    expect(body.variables.filter).not.toHaveProperty("project");
+  });
+
+  test("lists projected and unprojected issues across a team-wide target", async () => {
+    const { fetcher, requests } = mockFetch([
+      {
+        data: {
+          issues: {
+            nodes: [linearIssue("team-1", "project-1"), linearIssue("team-1")],
+            pageInfo: { hasNextPage: false },
+          },
+        },
+      },
+    ]);
+    const adapter = new LinearIssuesAdapter(
+      linearProfile,
+      linearTeamTarget,
+      { token: "secret" },
+      fetcher,
+    );
+
+    expect((await adapter.list()).issues).toHaveLength(2);
+    const body = JSON.parse(String(requests[0]?.init?.body));
+    expect(body.variables.filter).toEqual({ team: { id: { eq: "team-1" } } });
   });
 
   test("lists status matches inside the configured target in updated order", async () => {
@@ -771,6 +835,22 @@ describe("Linear adapter", () => {
     expect((await adapter.identity()).scopeId).toBe("workspace-1");
     expect((await adapter.create({ title: "Broken build" })).identifier).toBe("ENG-1");
     const body = JSON.parse(String(requests[1]?.init?.body));
+    expect(body.variables.input).toMatchObject({ title: "Broken build", teamId: "team-1" });
+    expect(body.variables.input).not.toHaveProperty("projectId");
+  });
+
+  test("creates an unprojected issue for a team-wide target", async () => {
+    const issue = linearIssue("team-1");
+    const { fetcher, requests } = mockFetch([{ data: { issueCreate: { success: true, issue } } }]);
+    const adapter = new LinearIssuesAdapter(
+      linearProfile,
+      linearTeamTarget,
+      { token: "secret" },
+      fetcher,
+    );
+
+    expect((await adapter.create({ title: "Broken build" })).identifier).toBe("ENG-1");
+    const body = JSON.parse(String(requests[0]?.init?.body));
     expect(body.variables.input).toMatchObject({ title: "Broken build", teamId: "team-1" });
     expect(body.variables.input).not.toHaveProperty("projectId");
   });

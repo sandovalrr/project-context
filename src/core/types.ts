@@ -90,7 +90,7 @@ export interface LinearProjectProvider extends ProjectProviderBase {
   type: "linear";
   target: {
     team: IdentityRef;
-    project: IdentityRef | "none";
+    project: IdentityRef | "none" | "any";
   };
 }
 
