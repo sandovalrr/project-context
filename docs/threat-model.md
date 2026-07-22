@@ -67,6 +67,11 @@ Ambiguous remotes, aliases, identifier patterns, client roots, and provider
 selection fail closed. Explicit URLs or provider-qualified references take
 precedence only when that provider is configured for the repository.
 
+GitHub Project targets use stable GraphQL node IDs for both the Project and its
+Status field. Direct reads and mutations verify Project membership; Project
+lists filter content type and repository. Names are never used as the security
+boundary.
+
 ### Valid credential for the wrong account
 
 Provider profiles bind credentials to an expected workspace, login, or Jira
@@ -135,6 +140,10 @@ publication occurs only after npm exposes that version.
   compromised credential helpers can access secrets.
 - Provider-side compromise, malicious issue content, DNS/TLS ecosystem failure,
   and provider authorization bugs are outside local enforcement.
+- Creating an issue and adding it to a Project, or changing Project Status and
+  synchronizing the issue lifecycle, are separate provider writes. A failure
+  between them can leave partial provider state that requires inspection; the
+  client does not retry either write automatically.
 - AES encryption does not provide protection when both key and state directory
   are stolen together.
 - Metadata-only audit is not a tamper-evident or remote compliance log.

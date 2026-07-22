@@ -359,7 +359,7 @@ async function execute(
 
       const mapping = nativeStatus(provider, canonical);
       const result = mapping.state
-        ? await adapter.transition(request.identifier, mapping.state)
+        ? await adapter.transition(request.identifier, mapping.state, canonical)
         : (currentIssue as IssueSnapshot);
 
       return applyMappedLabels(adapter, request.identifier, result, mapping);

@@ -2,8 +2,8 @@
 
 `project-context` is a local, provider-neutral MCP server for repository-scoped
 issue handling. It gives agents one guarded interface to Linear, GitHub Issues,
-and Jira Cloud while keeping project mappings and credentials outside source
-repositories.
+GitHub Projects v2, and Jira Cloud while keeping project mappings and
+credentials outside source repositories.
 
 The server resolves the current Git repository, selects its configured issue
 provider, verifies the authenticated account, and separates every write into a

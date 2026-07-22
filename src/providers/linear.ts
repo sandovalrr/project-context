@@ -21,8 +21,19 @@ import type {
 } from "./types.ts";
 
 function linearStatusFilter(match: NonNullable<IssueListOptions["matches"]>[number]) {
+  const states = match.states ?? (match.state ? [match.state] : []);
+  const stateCondition =
+    states.length === 0
+      ? []
+      : states.length === 1
+        ? [{ state: { name: { eqIgnoreCase: states[0] } } }]
+        : [
+            {
+              or: states.map((state) => ({ state: { name: { eqIgnoreCase: state } } })),
+            },
+          ];
   const conditions = [
-    ...(match.state ? [{ state: { name: { eqIgnoreCase: match.state } } }] : []),
+    ...stateCondition,
     ...match.labelsAll.map((label) => ({ labels: { name: { eqIgnoreCase: label } } })),
     ...match.labelsNone.map((label) => ({
       labels: { every: { name: { neqIgnoreCase: label } } },

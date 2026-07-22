@@ -21,5 +21,10 @@ The project registry is keyed by normalized Git remote, such as `github.com/exam
 Use the repository's `examples/` and `schemas/` directories for starter YAML and validation details. Never copy real tokens into example files.
 
 Canonical list filters use `mappings.status`. Add an explicit provider-neutral
-`match` with `state`, `labels_all`, and `labels_none` when transition mappings
-overlap. `doctor` reports missing or ambiguous list mappings.
+`match` with `state` or `states`, `labels_all`, and `labels_none` when transition
+mappings overlap. `doctor` reports missing or ambiguous list mappings.
+
+A GitHub provider may add `target.project` with stable `id` and
+`status_field.id` values plus display metadata. That narrows all issue reads and
+writes to issue items in the configured GitHub Project. Project Status names
+become native workflow states; new issues are added to the Project.

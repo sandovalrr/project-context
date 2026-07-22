@@ -21,6 +21,15 @@
 - Authentication: token from a command, keychain, file, or environment.
 - Expected identity: login and host.
 - Required target: explicit repository or `inherit` from a GitHub source repo.
+- Optional narrower target: a GitHub Projects v2 node ID and stable Status field
+  node ID. Reads and mutations then reject repository issues outside that
+  Project.
+- Project lists ignore pull requests, draft items, and issue items belonging to
+  other repositories. Collection is bounded to ten 100-item pages and reports
+  truncation at that boundary.
+- Creating an issue adds its GraphQL node to the configured Project. Project
+  Status drives canonical workflow filtering and transitions; the underlying
+  issue lifecycle is synchronized to open, completed, or not planned.
 - Pull requests returned through issue-shaped APIs are always excluded.
 - User discovery uses the repository's available issue assignees and returns
   the GitHub login as `assignee`.
@@ -28,8 +37,10 @@
   issue type as unsupported.
 - Option search scans only repository labels, stops after ten 100-label pages,
   and reports truncation when the bound prevents a complete answer.
-- Native states are `open` and `closed`; `in_progress` requires configured
-  labels.
+- Without a Project target, native states are `open` and `closed` and
+  `in_progress` requires configured labels. With a Project target, native states
+  are Status option names and `Canceled` represents GitHub's `not_planned`
+  closure reason.
 - No pull-request, release, or repository-administration operations are exposed.
 
 ## Jira Cloud

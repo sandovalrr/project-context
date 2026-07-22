@@ -46,12 +46,14 @@ export type StatusMapping = string | StatusMappingObject;
 
 export interface StatusMatchConfig {
   state?: string;
+  states?: string[];
   labels_all?: string[];
   labels_none?: string[];
 }
 
 export interface StatusMatch {
   state?: string;
+  states?: string[];
   labelsAll: string[];
   labelsNone: string[];
 }
@@ -98,10 +100,19 @@ export interface GitHubRepositoryTarget {
   name: string;
 }
 
+export interface GitHubProjectTarget {
+  id: string;
+  owner: string;
+  number: number;
+  name: string;
+  status_field: IdentityRef;
+}
+
 export interface GitHubProjectProvider extends ProjectProviderBase {
   type: "github";
   target: {
     repository: GitHubRepositoryTarget | "inherit";
+    project?: GitHubProjectTarget;
   };
 }
 

@@ -1,6 +1,16 @@
 import { ProjectContextError } from "../core/errors.ts";
-import type { GitHubProjectProvider, GitHubProviderProfile } from "../core/types.ts";
+import type {
+  CanonicalStatus,
+  GitHubProjectProvider,
+  GitHubProviderProfile,
+  StatusMatch,
+} from "../core/types.ts";
 import { issueFieldCapability } from "./capabilities.ts";
+import {
+  GitHubProjectClient,
+  type GitHubProjectIssueItem,
+  type GitHubProjectMembership,
+} from "./github-project.ts";
 import { requestJson, versionOf } from "./http.ts";
 import type {
   AssignableUser,
@@ -27,14 +37,22 @@ function quotedQualifier(name: string, value: string, negative = false): string 
 }
 
 function statusQuery(match: NonNullable<IssueListOptions["matches"]>[number]): string {
-  if (match.state && !["open", "closed"].includes(match.state.toLowerCase())) {
+  const states = match.states ?? (match.state ? [match.state] : []);
+  const invalidState = states.find((state) => !["open", "closed"].includes(state.toLowerCase()));
+  if (invalidState) {
     throw new ProjectContextError(
       "GITHUB_STATUS_FILTER_INVALID",
-      `GitHub status filters support only open or closed, not ${match.state}`,
+      `GitHub status filters support only open or closed, not ${invalidState}`,
     );
   }
+  const stateQualifier =
+    states.length === 0
+      ? []
+      : states.length === 1
+        ? [`is:${states[0]?.toLowerCase()}`]
+        : [`(${states.map((state) => `is:${state.toLowerCase()}`).join(" OR ")})`];
   const qualifiers = [
-    ...(match.state ? [`is:${match.state.toLowerCase()}`] : []),
+    ...stateQualifier,
     ...match.labelsAll.map((label) => quotedQualifier("label", label)),
     ...match.labelsNone.map((label) => quotedQualifier("label", label, true)),
   ];
@@ -44,10 +62,12 @@ function statusQuery(match: NonNullable<IssueListOptions["matches"]>[number]): s
 
 interface GitHubIssue {
   id: number;
+  node_id?: string;
   number: number;
   title: string;
   body: string | null;
   state: string;
+  state_reason?: string | null;
   html_url: string;
   updated_at: string;
   created_at?: string;
@@ -81,10 +101,31 @@ type GitHubAssignableUser = GitHubUser;
 
 const githubLabelSearchMaxPages = 10;
 
+function sameName(left: string, right: string): boolean {
+  return left.localeCompare(right, undefined, { sensitivity: "accent" }) === 0;
+}
+
+function containsName(names: string[], candidate: string): boolean {
+  return names.some((name) => sameName(name, candidate));
+}
+
+function matchesProjectFilter(item: GitHubProjectIssueItem, match: StatusMatch): boolean {
+  const status =
+    item.content.stateReason === "NOT_PLANNED" ? "Canceled" : (item.status ?? "No Status");
+  const states = match.states ?? (match.state ? [match.state] : undefined);
+  const stateMatches = states === undefined || containsName(states, status);
+  const labels = item.content.labels.nodes.map((label) => label.name);
+  const includesLabels = match.labelsAll.every((label) => containsName(labels, label));
+  const excludesLabels = match.labelsNone.every((label) => !containsName(labels, label));
+
+  return stateMatches && includesLabels && excludesLabels;
+}
+
 export class GitHubIssuesAdapter implements IssueProviderAdapter {
   readonly type = "github" as const;
   readonly #baseUrl: string;
   readonly #repository: { owner: string; name: string };
+  readonly #project: GitHubProjectClient | undefined;
 
   constructor(
     private readonly profile: GitHubProviderProfile,
@@ -101,6 +142,9 @@ export class GitHubIssuesAdapter implements IssueProviderAdapter {
       target.repository === "inherit"
         ? (inheritedRepository as { owner: string; name: string })
         : target.repository;
+    this.#project = target.project
+      ? new GitHubProjectClient(target.project, this.credential.token ?? "", this.fetcher)
+      : undefined;
   }
 
   #request<T>(path: string, method = "GET", body?: unknown): Promise<T> {
@@ -223,14 +267,23 @@ export class GitHubIssuesAdapter implements IssueProviderAdapter {
     };
   }
 
-  #snapshot(issue: GitHubIssue): IssueSnapshot {
+  #snapshot(issue: GitHubIssue, membership?: GitHubProjectMembership): IssueSnapshot {
+    const projectStatus =
+      issue.state_reason?.toUpperCase() === "NOT_PLANNED"
+        ? "Canceled"
+        : (membership?.status ?? "No Status");
+    const status = this.#project ? projectStatus : issue.state;
+    const version = membership
+      ? `${versionOf(issue.updated_at, String(issue.id))}:${membership.itemId}:${membership.statusOptionId ?? "none"}`
+      : versionOf(issue.updated_at, String(issue.id));
+
     return {
       provider: this.type,
       id: String(issue.id),
       identifier: `#${issue.number}`,
       title: issue.title,
       description: issue.body,
-      status: issue.state,
+      status,
       labels: (issue.labels ?? []).flatMap((label) =>
         typeof label === "string" ? [label] : label.name ? [label.name] : [],
       ),
@@ -242,8 +295,57 @@ export class GitHubIssuesAdapter implements IssueProviderAdapter {
       dueDate: null,
       url: issue.html_url,
       updatedAt: issue.updated_at,
-      version: versionOf(issue.updated_at, String(issue.id)),
+      version,
     };
+  }
+
+  #projectSnapshot(item: GitHubProjectIssueItem): IssueSnapshot {
+    const issue = item.content;
+
+    return this.#snapshot(
+      {
+        id: issue.databaseId,
+        node_id: issue.id,
+        number: issue.number,
+        title: issue.title,
+        body: issue.body,
+        state: issue.state.toLowerCase(),
+        state_reason: issue.stateReason?.toLowerCase() ?? null,
+        html_url: issue.url,
+        updated_at: issue.updatedAt,
+        created_at: issue.createdAt,
+        assignee: issue.assignees.nodes[0]
+          ? { id: issue.assignees.nodes[0].databaseId, login: issue.assignees.nodes[0].login }
+          : null,
+        user: issue.author ? { id: issue.author.databaseId, login: issue.author.login } : null,
+        labels: issue.labels.nodes,
+      },
+      { itemId: item.id, status: item.status, statusOptionId: item.statusOptionId },
+    );
+  }
+
+  async #scopedIssue(
+    identifier: string,
+  ): Promise<{ issue: GitHubIssue; membership?: GitHubProjectMembership }> {
+    const number = identifier.replace(/^#/, "");
+    const issue = await this.#request<GitHubIssue>(this.#issuePath(`/${number}`));
+    this.#assertIssue(issue);
+    if (!this.#project) return { issue };
+    if (!issue.node_id) {
+      throw new ProjectContextError(
+        "GITHUB_ISSUE_NODE_ID_MISSING",
+        "GitHub issue response did not include a GraphQL node identity",
+      );
+    }
+    const membership = await this.#project.membership(issue.node_id);
+    if (!membership) {
+      throw new ProjectContextError(
+        "ISSUE_OUTSIDE_TARGET",
+        "GitHub issue is outside the configured Project target",
+      );
+    }
+
+    return { issue, membership };
   }
 
   #assertIssue(issue: GitHubIssue): void {
@@ -280,6 +382,22 @@ export class GitHubIssuesAdapter implements IssueProviderAdapter {
 
   async list(options: IssueListOptions = {}): Promise<IssueListResult> {
     const limit = options.limit ?? 30;
+    if (this.#project) {
+      const result = await this.#project.collectIssueItems(
+        `${this.#repository.owner}/${this.#repository.name}`,
+      );
+      const filtered = result.items.filter(
+        (item) =>
+          !options.matches?.length ||
+          options.matches.some((match) => matchesProjectFilter(item, match)),
+      );
+      const issues = filtered
+        .toSorted((left, right) => right.content.updatedAt.localeCompare(left.content.updatedAt))
+        .slice(0, limit)
+        .map((item) => this.#projectSnapshot(item));
+
+      return { issues, truncated: result.truncated || filtered.length > issues.length };
+    }
     const filters = options.matches?.map(statusQuery).filter(Boolean) ?? [];
     const statusFilter =
       filters.length === 0
@@ -306,6 +424,22 @@ export class GitHubIssuesAdapter implements IssueProviderAdapter {
   }
 
   async search(query: string, limit = 30): Promise<IssueSnapshot[]> {
+    if (this.#project) {
+      const result = await this.#project.collectIssueItems(
+        `${this.#repository.owner}/${this.#repository.name}`,
+      );
+      const normalizedQuery = query.trim().toLocaleLowerCase();
+
+      return result.items
+        .filter((item) =>
+          [item.content.title, item.content.body ?? ""].some((value) =>
+            value.toLocaleLowerCase().includes(normalizedQuery),
+          ),
+        )
+        .toSorted((left, right) => right.content.updatedAt.localeCompare(left.content.updatedAt))
+        .slice(0, limit)
+        .map((item) => this.#projectSnapshot(item));
+    }
     const result = await this.#request<{ items: GitHubIssue[] }>(
       `/search/issues?q=${encodeURIComponent(`${query} repo:${this.#repository.owner}/${this.#repository.name} is:issue`)}&per_page=${limit}`,
     );
@@ -367,17 +501,14 @@ export class GitHubIssuesAdapter implements IssueProviderAdapter {
   }
 
   async get(identifier: string): Promise<IssueSnapshot> {
-    const number = identifier.replace(/^#/, "");
-    const issue = await this.#request<GitHubIssue>(this.#issuePath(`/${number}`));
-    this.#assertIssue(issue);
+    const { issue, membership } = await this.#scopedIssue(identifier);
 
-    return this.#snapshot(issue);
+    return this.#snapshot(issue, membership);
   }
 
   async listComments(identifier: string, limit = 30): Promise<IssueCommentListResult> {
     const number = identifier.replace(/^#/, "");
-    const issue = await this.#request<GitHubIssue>(this.#issuePath(`/${number}`));
-    this.#assertIssue(issue);
+    const { issue } = await this.#scopedIssue(identifier);
 
     const total = issue.comments ?? 0;
     if (total === 0) return { comments: [], truncated: false };
@@ -402,8 +533,7 @@ export class GitHubIssuesAdapter implements IssueProviderAdapter {
           ),
         )
       : [];
-    const verifiedIssue = await this.#request<GitHubIssue>(this.#issuePath(`/${number}`));
-    this.#assertIssue(verifiedIssue);
+    await this.#scopedIssue(identifier);
 
     const comments = [...previousComments, ...lastComments]
       .slice(-limit)
@@ -421,12 +551,22 @@ export class GitHubIssuesAdapter implements IssueProviderAdapter {
       ...(input.labels === undefined ? {} : { labels: input.labels }),
       ...(input.assignee === undefined ? {} : { assignees: [input.assignee] }),
     });
-    return this.#snapshot(issue);
+    if (!this.#project) return this.#snapshot(issue);
+    if (!issue.node_id) {
+      throw new ProjectContextError(
+        "GITHUB_ISSUE_NODE_ID_MISSING",
+        "GitHub issue response did not include a GraphQL node identity",
+      );
+    }
+    const membership = await this.#project.add(issue.node_id);
+
+    return this.#snapshot(issue, membership);
   }
 
   async update(identifier: string, input: IssueUpdateInput): Promise<IssueSnapshot> {
     this.#assertSupportedFields(input);
     const number = identifier.replace(/^#/, "");
+    const membership = this.#project ? (await this.#scopedIssue(identifier)).membership : undefined;
     const issue = await this.#request<GitHubIssue>(this.#issuePath(`/${number}`), "PATCH", {
       ...(input.title === undefined ? {} : { title: input.title }),
       ...(input.description === undefined ? {} : { body: input.description }),
@@ -435,21 +575,59 @@ export class GitHubIssuesAdapter implements IssueProviderAdapter {
         ? {}
         : { assignees: input.assignee ? [input.assignee] : [] }),
     });
-    return this.#snapshot(issue);
+    return this.#snapshot(issue, membership);
   }
 
   async comment(identifier: string, body: string): Promise<void> {
     const number = identifier.replace(/^#/, "");
+    if (this.#project) await this.#scopedIssue(identifier);
     await this.#request(this.#issuePath(`/${number}/comments`), "POST", { body });
   }
 
-  async transition(identifier: string, nativeStatus: string): Promise<IssueSnapshot> {
+  async transition(
+    identifier: string,
+    nativeStatus: string,
+    canonicalStatus?: CanonicalStatus,
+  ): Promise<IssueSnapshot> {
     const number = identifier.replace(/^#/, "");
-    return this.#snapshot(
-      await this.#request<GitHubIssue>(this.#issuePath(`/${number}`), "PATCH", {
-        state: nativeStatus,
-      }),
+    if (!this.#project) {
+      return this.#snapshot(
+        await this.#request<GitHubIssue>(this.#issuePath(`/${number}`), "PATCH", {
+          state: nativeStatus,
+        }),
+      );
+    }
+    if (!canonicalStatus) {
+      throw new ProjectContextError(
+        "STATUS_INVALID",
+        "GitHub Project transitions require a canonical status",
+      );
+    }
+    const { membership } = await this.#scopedIssue(identifier);
+    if (!membership) {
+      throw new ProjectContextError(
+        "ISSUE_OUTSIDE_TARGET",
+        "GitHub issue is outside the configured Project target",
+      );
+    }
+    const optionId = await this.#project.updateStatus(membership.itemId, nativeStatus);
+    const lifecycle =
+      canonicalStatus === "done"
+        ? { state: "closed", state_reason: "completed" }
+        : canonicalStatus === "canceled"
+          ? { state: "closed", state_reason: "not_planned" }
+          : { state: "open" };
+    const issue = await this.#request<GitHubIssue>(
+      this.#issuePath(`/${number}`),
+      "PATCH",
+      lifecycle,
     );
+
+    return this.#snapshot(issue, {
+      itemId: membership.itemId,
+      status: nativeStatus,
+      statusOptionId: optionId,
+    });
   }
 
   async link(identifier: string, targetUrl: string): Promise<void> {
