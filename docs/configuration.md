@@ -93,6 +93,46 @@ requires a project ID/name. A GitHub target can be `inherit` for a GitHub source
 repository or an explicit `{id, owner, name}` object. A Bitbucket repository may
 route to any supported issue provider.
 
+GitHub Projects v2 can optionally narrow that repository target further. The
+Project and Status field GraphQL node IDs are authoritative; owner, number,
+name, and field name are readable metadata. A Project target includes only
+issue items from the configured repository. Pull requests and draft items are
+ignored.
+
+```yaml
+target:
+  repository: inherit
+  project:
+    id: PVT_example
+    owner: example-organization
+    number: 9
+    name: UI Team
+    status_field:
+      id: PVTSSF_example
+      name: Status
+mappings:
+  status:
+    open:
+      state: Ready for Dev
+      match:
+        states: [Idea, In Requirements, Ready for Dev]
+    in_progress:
+      state: In Development
+      match:
+        states: [In Development, In Review, Quality Assurance]
+    done: Done
+    canceled:
+      state: Done
+      match:
+        state: Canceled
+```
+
+For Project targets, the configured Project Status is the native status.
+`Canceled` is synthesized when GitHub reports a closed issue with reason
+`not_planned`; it does not require a matching Project option. A transition also
+synchronizes the underlying issue: `open` and `in_progress` reopen it, `done`
+closes it as completed, and `canceled` closes it as not planned.
+
 Run `project-context config validate` after every edit. Run
 `project-context doctor --cwd /path/to/repository` to also verify permissions,
 routing, the active account, and whether canonical statuses are unambiguously
@@ -104,6 +144,9 @@ state. Object mappings without `match` derive `state`, `labels_all` from
 when those derived predicates overlap. Listing fails closed with
 `STATUS_MAPPING_MISSING` or `STATUS_FILTER_AMBIGUOUS` rather than weakening a
 requested canonical filter.
+
+Use `match.states` when one canonical status represents multiple native
+workflow states. `state` and `states` are mutually exclusive within one match.
 
 ## Credential registry
 

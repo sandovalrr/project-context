@@ -23,13 +23,16 @@ honor the canonical filter.
 Provider routing is not sufficient by itself: Linear direct lookups must match
 the configured team and explicit/no-project target, and Jira direct lookups
 must match the configured project. Prepare and apply re-run those checks before
-an external mutation can proceed.
+an external mutation can proceed. A GitHub provider with a Project target also
+requires current membership in that exact Project; a repository issue outside
+it returns `ISSUE_OUTSIDE_TARGET`.
 
 Comment reads use the same deterministic routing and return only comments from
 the configured issue target. Linear validates team and project in the comment
 query. Jira validates the project before and after its separate comment page
-request. GitHub uses a repository-scoped endpoint and rejects pull requests,
-even though GitHub exposes pull-request comments through its Issues API.
+request. GitHub uses a repository-scoped endpoint, rejects pull requests, and
+checks Project membership when a Project target is configured, even though
+GitHub exposes pull-request comments through its Issues API.
 Providers use bounded pagination and normalize results newest first; a
 `truncated` result means older comments were not returned.
 
@@ -64,10 +67,12 @@ canceled
 
 Project configuration maps those intents to provider-native states or labels.
 Schema version 2 optionally adds a provider-neutral `match` predicate with
-`state`, `labels_all`, and `labels_none` for read-side classification. Simple
-status strings and transition objects derive a match automatically. Missing or
-overlapping requested mappings fail closed. GitHub has no native `in_progress`
-state, so it requires explicit label actions and mutually exclusive matches.
+`state` or `states`, plus `labels_all` and `labels_none`, for read-side
+classification. `states` maps several native workflow states to one canonical
+status. Simple status strings and transition objects derive a match
+automatically. Missing or overlapping requested mappings fail closed. GitHub
+Issues without a Project has no native `in_progress` state, so it requires
+explicit label actions and mutually exclusive matches.
 
 Creating an issue without a requested state uses the provider's normal default.
 

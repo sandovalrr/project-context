@@ -1,4 +1,4 @@
-import type { ProviderType, StatusMatch } from "../core/types.ts";
+import type { CanonicalStatus, ProviderType, StatusMatch } from "../core/types.ts";
 
 export interface ProviderIdentity {
   provider: ProviderType;
@@ -147,6 +147,10 @@ export interface IssueProviderAdapter {
   create(input: IssueCreateInput): Promise<IssueSnapshot>;
   update(identifier: string, input: IssueUpdateInput): Promise<IssueSnapshot>;
   comment(identifier: string, body: string): Promise<void>;
-  transition(identifier: string, nativeStatus: string): Promise<IssueSnapshot>;
+  transition(
+    identifier: string,
+    nativeStatus: string,
+    canonicalStatus?: CanonicalStatus,
+  ): Promise<IssueSnapshot>;
   link(identifier: string, targetUrl: string): Promise<void>;
 }

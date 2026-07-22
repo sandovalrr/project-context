@@ -26,8 +26,15 @@ function jqlValue(value: string): string {
 }
 
 function jiraStatusFilter(match: NonNullable<IssueListOptions["matches"]>[number]): string {
+  const states = match.states ?? (match.state ? [match.state] : []);
+  const stateClause =
+    states.length === 0
+      ? []
+      : states.length === 1
+        ? [`status = ${jqlValue(states[0] as string)}`]
+        : [`status in (${states.map(jqlValue).join(", ")})`];
   const clauses = [
-    ...(match.state ? [`status = ${jqlValue(match.state)}`] : []),
+    ...stateClause,
     ...match.labelsAll.map((label) => `labels = ${jqlValue(label)}`),
     ...match.labelsNone.map((label) => `(labels != ${jqlValue(label)} OR labels is EMPTY)`),
   ];

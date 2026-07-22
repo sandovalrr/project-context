@@ -26,6 +26,7 @@ Node 22+ bundled executables
         |
         +------ Linear adapter
         +------ GitHub Issues adapter
+        |          +------ optional Projects v2 boundary
         +------ Jira Cloud adapter
 ```
 
@@ -53,6 +54,12 @@ process cwd are fallbacks only.
 Reusable provider profiles bind credential aliases to expected identities.
 Project entries reference profiles and add their issue target. The source-code
 host and issue provider are independent.
+
+The GitHub adapter keeps repository issue operations as its public provider
+interface. When a Projects v2 target is present, an internal GraphQL module
+owns bounded item collection, membership assertions, Project enrollment, and
+Status option mutation. This prevents Project-specific concepts from leaking
+into provider-neutral operations.
 
 Every write revalidates the provider identity immediately before execution. A
 valid credential for the wrong Linear workspace, GitHub login, or Jira

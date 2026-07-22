@@ -147,7 +147,7 @@ describe("GitHub Issues adapter", () => {
     );
 
     const result = await adapter.list({
-      matches: [{ state: "open", labelsAll: ["in-progress"], labelsNone: ["paused"] }],
+      matches: [{ states: ["open", "closed"], labelsAll: ["in-progress"], labelsNone: ["paused"] }],
       limit: 1,
     });
 
@@ -156,6 +156,7 @@ describe("GitHub Issues adapter", () => {
     expect(query).toContain("repo:acme/payments");
     expect(query).toContain("is:issue");
     expect(query).toContain("is:open");
+    expect(query).toContain("is:closed");
     expect(query).toContain('label:"in-progress"');
     expect(query).toContain('-label:"paused"');
     expect(query).toContain("sort=updated");
@@ -716,7 +717,13 @@ describe("Linear adapter", () => {
     );
 
     const result = await adapter.list({
-      matches: [{ state: "In Progress", labelsAll: ["doing"], labelsNone: ["paused"] }],
+      matches: [
+        {
+          states: ["In Progress", "In Review"],
+          labelsAll: ["doing"],
+          labelsNone: ["paused"],
+        },
+      ],
       limit: 1,
     });
 
@@ -729,6 +736,7 @@ describe("Linear adapter", () => {
       project: { null: true },
     });
     expect(JSON.stringify(body.variables.filter)).toContain("In Progress");
+    expect(JSON.stringify(body.variables.filter)).toContain("In Review");
     expect(JSON.stringify(body.variables.filter)).toContain("doing");
     expect(JSON.stringify(body.variables.filter)).toContain("paused");
   });
@@ -1020,14 +1028,20 @@ describe("Jira Cloud adapter", () => {
     );
 
     const result = await adapter.list({
-      matches: [{ state: "In Progress", labelsAll: ["doing"], labelsNone: ["paused"] }],
+      matches: [
+        {
+          states: ["In Progress", "In Review"],
+          labelsAll: ["doing"],
+          labelsNone: ["paused"],
+        },
+      ],
       limit: 1,
     });
 
     expect(result).toMatchObject({ truncated: true, issues: [{ identifier: "OPS-4" }] });
     const body = JSON.parse(String(requests[0]?.init?.body));
     expect(body.jql).toContain('project = "10000"');
-    expect(body.jql).toContain('status = "In Progress"');
+    expect(body.jql).toContain('status in ("In Progress", "In Review")');
     expect(body.jql).toContain('labels = "doing"');
     expect(body.jql).toContain('labels != "paused" OR labels is EMPTY');
     expect(body.jql).toContain("ORDER BY updated DESC");

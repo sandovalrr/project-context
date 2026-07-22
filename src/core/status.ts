@@ -20,6 +20,7 @@ function derivedMatch(mapping: StatusMapping): StatusMatch {
   if (mapping.match) {
     return {
       ...(mapping.match.state ? { state: mapping.match.state } : {}),
+      ...(mapping.match.states ? { states: mapping.match.states } : {}),
       labelsAll: mapping.match.labels_all ?? [],
       labelsNone: mapping.match.labels_none ?? [],
     };
@@ -39,8 +40,19 @@ function configuredStatusFilters(provider: ProjectProvider): CanonicalStatusFilt
   });
 }
 
-function namesOverlap(left: string | undefined, right: string | undefined): boolean {
-  return left === undefined || right === undefined || sameName(left, right);
+function matchingStates(match: StatusMatch): string[] | undefined {
+  return match.states ?? (match.state ? [match.state] : undefined);
+}
+
+function statesOverlap(left: StatusMatch, right: StatusMatch): boolean {
+  const leftStates = matchingStates(left);
+  const rightStates = matchingStates(right);
+
+  return (
+    leftStates === undefined ||
+    rightStates === undefined ||
+    leftStates.some((state) => containsName(rightStates, state))
+  );
 }
 
 function containsName(names: string[], candidate: string): boolean {
@@ -52,7 +64,7 @@ function predicatesOverlap(left: StatusMatch, right: StatusMatch): boolean {
     left.labelsAll.some((label) => containsName(right.labelsNone, label)) ||
     right.labelsAll.some((label) => containsName(left.labelsNone, label));
 
-  return namesOverlap(left.state, right.state) && !labelConflict;
+  return statesOverlap(left, right) && !labelConflict;
 }
 
 function overlappingPairs(
@@ -70,7 +82,8 @@ function overlappingPairs(
 }
 
 function issueMatches(match: StatusMatch, issue: IssueSnapshot): boolean {
-  const stateMatches = match.state === undefined || sameName(match.state, issue.status);
+  const states = matchingStates(match);
+  const stateMatches = states === undefined || containsName(states, issue.status);
   const includesLabels = match.labelsAll.every((label) => containsName(issue.labels, label));
   const excludesLabels = match.labelsNone.every((label) => !containsName(issue.labels, label));
 

@@ -25,6 +25,7 @@
     "issues",
     "linear",
     "github-issues",
+    "github-projects",
     "jira"
   ],
   "files": [

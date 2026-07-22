@@ -60,31 +60,26 @@ projects:
           profile: github-example
           target:
             repository: inherit
+            project:
+              id: PVT_example
+              owner: example
+              number: 9
+              name: Example Project
+              status_field:
+                id: PVTSSF_example
+                name: Status
           mappings:
             status:
               open:
-                state: open
+                state: Ready for Dev
                 match:
-                  state: open
-                  labels_none: [in-progress, canceled]
+                  states: [Idea, Ready for Dev]
               in_progress:
-                state: open
-                add_labels: [in-progress]
-                remove_labels: [canceled]
+                state: In Development
                 match:
-                  state: open
-                  labels_all: [in-progress]
-                  labels_none: [canceled]
-              done:
-                state: closed
-                remove_labels: [in-progress, canceled]
-                match:
-                  state: closed
-                  labels_none: [canceled]
+                  states: [In Development, In Review]
+              done: Done
               canceled:
-                state: closed
-                add_labels: [canceled]
-                remove_labels: [in-progress]
+                state: Done
                 match:
-                  state: closed
-                  labels_all: [canceled]
+                  state: Canceled

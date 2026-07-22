@@ -75,6 +75,32 @@ describe("canonical status filters", () => {
     });
   });
 
+  test("matches one canonical status to multiple native workflow states", () => {
+    const configured = provider({
+      open: {
+        state: "Ready for Dev",
+        match: {
+          states: ["Idea", "In Requirements", "Ready for Dev"],
+        },
+      },
+      in_progress: {
+        state: "In Development",
+        match: {
+          states: ["In Development", "In Review", "Quality Assurance"],
+        },
+      },
+    } as NonNullable<NonNullable<GitHubProjectProvider["mappings"]>["status"]>);
+
+    expect(resolveStatusFilters(configured, ["open"])[0]?.match).toEqual({
+      states: ["Idea", "In Requirements", "Ready for Dev"],
+      labelsAll: [],
+      labelsNone: [],
+    });
+    expect(classifyCanonicalStatus(configured, { ...issue, status: "In Review" })).toBe(
+      "in_progress",
+    );
+  });
+
   test("fails closed for missing and ambiguous requested mappings", () => {
     expect(() => resolveStatusFilters(provider({ open: "open" }), ["done"])).toThrow(
       "No done status mapping",

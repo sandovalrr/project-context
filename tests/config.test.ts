@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   loadCredentialConfig,
   loadProjectsConfig,
+  validateProjectsConfigValue,
   validateRegistryReferences,
 } from "../src/core/config.ts";
 import { migrateHostConfiguration } from "../src/core/migrations.ts";
@@ -71,6 +72,43 @@ describe("configuration", () => {
     provider.profile = "github-example";
 
     expect(() => validateRegistryReferences(projects, credentials)).toThrow("type does not match");
+  });
+
+  test("accepts a GitHub Projects v2 target with a stable Status field identity", async () => {
+    const projects = await loadProjectsConfig("examples/projects.example.yaml");
+    const github =
+      projects.projects["github.com/example/example-repository"]?.issues.providers.github;
+    if (github?.type !== "github") throw new Error("test fixture missing GitHub provider");
+
+    Object.assign(github.target, {
+      project: {
+        id: "PVT_example",
+        owner: "example",
+        number: 9,
+        name: "UI Team",
+        status_field: { id: "PVTSSF_status", name: "Status" },
+      },
+    });
+
+    expect(() => validateProjectsConfigValue(projects)).not.toThrow();
+  });
+
+  test("rejects a status match that configures both state and states", async () => {
+    const projects = await loadProjectsConfig("examples/projects.example.yaml");
+    const github =
+      projects.projects["github.com/example/example-repository"]?.issues.providers.github;
+    if (github?.type !== "github") throw new Error("test fixture missing GitHub provider");
+
+    github.mappings = {
+      status: {
+        open: {
+          state: "open",
+          match: { state: "open", states: ["open"] },
+        },
+      },
+    };
+
+    expect(() => validateProjectsConfigValue(projects)).toThrow("must NOT be valid");
   });
 
   test("directs older project registries to the explicit migration command", async () => {
