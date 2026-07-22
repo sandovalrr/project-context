@@ -88,10 +88,47 @@ projects:
                   labels_all: [canceled]
 ```
 
-Linear requires a team and an explicit project object or `none`. Jira Cloud
-requires a project ID/name. A GitHub target can be `inherit` for a GitHub source
-repository or an explicit `{id, owner, name}` object. A Bitbucket repository may
-route to any supported issue provider.
+Linear requires a team and one explicit project policy:
+
+- An `{id, name}` object includes only that project.
+- An `{include, create_in}` object includes several named projects. `create_in`
+  is required and must equal one of the included project IDs.
+- `none` includes only issues without a project.
+- `any` includes projected and unprojected issues across the configured team.
+
+`any` never crosses the configured team boundary. New issues created through an
+`any` target are created in the team without an assigned project; project
+assignment remains a separate provider-side decision.
+
+```yaml
+target:
+  team:
+    id: 00000000-0000-4000-8000-000000000002
+    name: Engineering
+  project: any
+```
+
+Use stable Linear project IDs for a multi-project selection. Direct reads,
+lists, searches, and mutations reject issues outside `include`. New issues are
+created in `create_in`; list order never controls issue placement.
+
+```yaml
+target:
+  team:
+    id: 00000000-0000-4000-8000-000000000002
+    name: Engineering
+  project:
+    include:
+      - id: 00000000-0000-4000-8000-000000000003
+        name: Notifications
+      - id: 00000000-0000-4000-8000-000000000004
+        name: Conditions
+    create_in: 00000000-0000-4000-8000-000000000003
+```
+
+Jira Cloud requires a project ID/name. A GitHub target can be `inherit` for a
+GitHub source repository or an explicit `{id, owner, name}` object. A Bitbucket
+repository may route to any supported issue provider.
 
 GitHub Projects v2 can optionally narrow that repository target further. The
 Project and Status field GraphQL node IDs are authoritative; owner, number,

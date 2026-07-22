@@ -39,7 +39,13 @@ projects:
             team:
               id: 00000000-0000-4000-8000-000000000002
               name: Engineering
-            project: none
+            project:
+              include:
+                - id: 00000000-0000-4000-8000-000000000003
+                  name: Notifications
+                - id: 00000000-0000-4000-8000-000000000004
+                  name: Conditions
+              create_in: 00000000-0000-4000-8000-000000000003
           mappings:
             status:
               open: Backlog

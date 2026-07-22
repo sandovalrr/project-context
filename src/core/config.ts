@@ -6,7 +6,7 @@ import credentialsSchema from "../../schemas/credentials.schema.json";
 import projectsSchema from "../../schemas/projects.schema.json";
 import { ProjectContextError } from "./errors.ts";
 import { absolutePath, getPaths } from "./paths.ts";
-import type { CredentialsConfig, ProjectsConfig } from "./types.ts";
+import type { CredentialsConfig, LinearProjectProvider, ProjectsConfig } from "./types.ts";
 
 const ajv = new Ajv2020({ allErrors: true, strict: true });
 const validateProjectsSchema = ajv.compile(projectsSchema) as ValidateFunction<ProjectsConfig>;
@@ -152,6 +152,9 @@ function validateProjectInternals(projects: ProjectsConfig): void {
           `Project ${repositoryId} provider ${providerAlias} type does not match profile ${provider.profile}`,
         );
       }
+      if (provider.type === "linear") {
+        validateLinearProjectSelection(repositoryId, providerAlias, provider);
+      }
       for (const pattern of provider.identifiers ?? []) {
         try {
           new RegExp(pattern);
@@ -173,6 +176,32 @@ function validateProjectInternals(projects: ProjectsConfig): void {
         );
       }
     }
+  }
+}
+
+function validateLinearProjectSelection(
+  repositoryId: string,
+  providerAlias: string,
+  provider: LinearProjectProvider,
+): void {
+  const project = provider.target.project;
+  if (typeof project === "string" || !("include" in project)) return;
+
+  const projectIds = project.include.map(({ id }) => id);
+  const uniqueProjectIds = new Set(projectIds);
+  const context = `Project ${repositoryId} provider ${providerAlias}`;
+
+  if (uniqueProjectIds.size !== projectIds.length) {
+    throw new ProjectContextError(
+      "LINEAR_PROJECT_SELECTION_INVALID",
+      `${context} must not include the same Linear project ID more than once`,
+    );
+  }
+  if (!uniqueProjectIds.has(project.create_in)) {
+    throw new ProjectContextError(
+      "LINEAR_PROJECT_SELECTION_INVALID",
+      `${context} create_in must reference an included Linear project ID`,
+    );
   }
 }
 

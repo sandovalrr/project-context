@@ -21,11 +21,13 @@ limit separately to every provider and fails as a whole if any provider cannot
 honor the canonical filter.
 
 Provider routing is not sufficient by itself: Linear direct lookups must match
-the configured team and explicit/no-project target, and Jira direct lookups
-must match the configured project. Prepare and apply re-run those checks before
-an external mutation can proceed. A GitHub provider with a Project target also
-requires current membership in that exact Project; a repository issue outside
-it returns `ISSUE_OUTSIDE_TARGET`.
+the configured team and project policy. One explicit project, a multi-project
+`include` selection, and `none` enforce project membership; `any` admits every
+projected and unprojected issue in that team but never another team. Jira direct
+lookups must match the configured project. Prepare and apply re-run those checks
+before an external mutation can proceed. A GitHub provider with a Project target
+also requires current membership in that exact Project; a repository issue
+outside it returns `ISSUE_OUTSIDE_TARGET`.
 
 Comment reads use the same deterministic routing and return only comments from
 the configured issue target. Linear validates team and project in the comment

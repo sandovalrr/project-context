@@ -222,13 +222,37 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
     };
   }
 
+  #targetFilter(): Record<string, unknown> {
+    const project = this.target.project;
+
+    if (project === "any") {
+      return { team: { id: { eq: this.target.team.id } } };
+    }
+
+    const projectFilter =
+      project === "none"
+        ? { null: true }
+        : "include" in project
+          ? { id: { in: project.include.map(({ id }) => id) } }
+          : { id: { eq: project.id } };
+
+    return {
+      team: { id: { eq: this.target.team.id } },
+      project: projectFilter,
+    };
+  }
+
   #assertTarget(issue: LinearIssue): void {
+    const project = this.target.project;
     const teamMatches = issue.team?.id === this.target.team.id;
     const projectMatches =
-      Object.hasOwn(issue, "project") &&
-      (this.target.project === "none"
-        ? issue.project === null
-        : issue.project?.id === this.target.project.id);
+      project === "any" ||
+      (Object.hasOwn(issue, "project") &&
+        (project === "none"
+          ? issue.project === null
+          : "include" in project
+            ? project.include.some(({ id }) => id === issue.project?.id)
+            : issue.project?.id === project.id));
     if (teamMatches && projectMatches) return;
 
     throw new ProjectContextError(
@@ -362,12 +386,9 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
 
   async list(options: IssueListOptions = {}): Promise<IssueListResult> {
     const limit = options.limit ?? 30;
-    const projectFilter =
-      this.target.project === "none" ? { null: true } : { id: { eq: this.target.project.id } };
     const matches = options.matches?.map(linearStatusFilter) ?? [];
     const filter = {
-      team: { id: { eq: this.target.team.id } },
-      project: projectFilter,
+      ...this.#targetFilter(),
       ...(matches.length === 0 ? {} : { or: matches }),
     };
     const data = await this.#graphql<{
@@ -394,11 +415,8 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
   }
 
   async search(query: string, limit = 30): Promise<IssueSnapshot[]> {
-    const projectFilter =
-      this.target.project === "none" ? { null: true } : { id: { eq: this.target.project.id } };
     const filter = {
-      team: { id: { eq: this.target.team.id } },
-      project: projectFilter,
+      ...this.#targetFilter(),
       or: [
         { title: { containsIgnoreCase: query } },
         { description: { containsIgnoreCase: query } },
@@ -554,11 +572,18 @@ export class LinearIssuesAdapter implements IssueProviderAdapter {
   }
 
   async create(input: IssueCreateInput): Promise<IssueSnapshot> {
+    const project = this.target.project;
+    const projectId =
+      typeof project === "string"
+        ? undefined
+        : "include" in project
+          ? project.create_in
+          : project.id;
     const variables = {
       input: {
         ...(await this.#input(input)),
         teamId: this.target.team.id,
-        ...(this.target.project === "none" ? {} : { projectId: this.target.project.id }),
+        ...(projectId ? { projectId } : {}),
       },
     };
     const data = await this.#graphql<{ issueCreate: { success: boolean; issue: LinearIssue } }>(

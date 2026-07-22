@@ -90,8 +90,13 @@ export interface LinearProjectProvider extends ProjectProviderBase {
   type: "linear";
   target: {
     team: IdentityRef;
-    project: IdentityRef | "none";
+    project: IdentityRef | LinearProjectSelection | "none" | "any";
   };
+}
+
+export interface LinearProjectSelection {
+  include: IdentityRef[];
+  create_in: string;
 }
 
 export interface GitHubRepositoryTarget {

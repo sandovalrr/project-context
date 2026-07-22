@@ -36,6 +36,19 @@
         "name": { "type": "string", "minLength": 1 }
       }
     },
+    "linearProjectSelection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["include", "create_in"],
+      "properties": {
+        "include": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "$ref": "#/$defs/identityRef" }
+        },
+        "create_in": { "type": "string", "minLength": 1 }
+      }
+    },
     "providerProfile": {
       "oneOf": [
         { "$ref": "#/$defs/linearProfile" },
@@ -164,7 +177,11 @@
               "properties": {
                 "team": { "$ref": "#/$defs/identityRef" },
                 "project": {
-                  "oneOf": [{ "$ref": "#/$defs/identityRef" }, { "const": "none" }]
+                  "oneOf": [
+                    { "$ref": "#/$defs/identityRef" },
+                    { "$ref": "#/$defs/linearProjectSelection" },
+                    { "enum": ["none", "any"] }
+                  ]
                 }
               }
             },
